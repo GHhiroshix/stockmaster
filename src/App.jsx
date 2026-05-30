@@ -150,21 +150,56 @@ export default function App() {
     setTimeout(() => setToasts(t => t.filter(x => x.id!==id)), 3400);
   }, []);
 
-  const processJan = useCallback((code) => {
+  const processJan = useCallback(async (code) => {
     code = code.trim().replace(/\D/g,"");
     if(code.length < 8) { addToast("8〜13桁のJANコードを入力してください","err"); return; }
-    const p = PRODUCTS[code];
-    const product = p
-      ? {jan:code, name:p.name, price:p.price, cost:0, brand:p.brand}
-      : {jan:code, name:"商品 (JAN:"+code+")", price:0, cost:0, brand:"不明"};
-    if(!p) addToast("内蔵DBに未登録です。商品名・価格を手入力してください","info");
-    const existing = db.find(i => i.jan===code) || null;
-    setModal({product, isNew:!existing, existing});
-    setArQty(1);
-    setArCost(String(product.cost||""));
-    setArCat(existing ? existing.categoryId : "");
-    setArSupplier(existing ? existing.supplier||"" : "");
-    setJan("");
+
+    // まず内蔵DBを確認
+    const local = PRODUCTS[code];
+    if (local) {
+      const product = {jan:code, name:local.name, price:local.price, cost:0, brand:local.brand};
+      const existing = db.find(i => i.jan===code) || null;
+      setModal({product, isNew:!existing, existing});
+      setArQty(1);
+      setArCost(String(product.cost||""));
+      setArCat(existing ? existing.categoryId : "");
+      setArSupplier(existing ? existing.supplier||"" : "");
+      setJan("");
+      return;
+    }
+
+    // 内蔵DBにない場合は楽天APIを呼び出す
+    setLoading(true);
+    addToast("楽天APIで商品情報を検索中…","info");
+    try {
+      const res = await fetch("/api/search?jan=" + encodeURIComponent(code));
+      const data = await res.json();
+
+      let product;
+      if (res.ok && data.name) {
+        product = {jan:code, name:data.name, price:data.price||0, cost:0, brand:data.brand||""};
+        addToast("楽天から商品情報を取得しました","ok");
+      } else {
+        // APIでも見つからない場合は手入力
+        product = {jan:code, name:"商品 (JAN:"+code+")", price:0, cost:0, brand:""};
+        addToast("商品が見つかりませんでした。手入力してください","info");
+      }
+
+      const existing = db.find(i => i.jan===code) || null;
+      setModal({product, isNew:!existing, existing});
+      setArQty(1);
+      setArCost(String(product.cost||""));
+      setArCat(existing ? existing.categoryId : "");
+      setArSupplier(existing ? existing.supplier||"" : "");
+      setJan("");
+    } catch(e) {
+      const product = {jan:code, name:"商品 (JAN:"+code+")", price:0, cost:0, brand:""};
+      const existing = db.find(i => i.jan===code) || null;
+      setModal({product, isNew:!existing, existing});
+      setArQty(1); setArCost(""); setArCat(""); setArSupplier(""); setJan("");
+      addToast("通信エラー。手入力してください","err");
+    }
+    setLoading(false);
   }, [db, addToast]);
 
   const handleSearch = () => processJan(jan);
