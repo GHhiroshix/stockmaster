@@ -168,9 +168,9 @@ export default function App() {
       return;
     }
 
-    // 内蔵DBにない場合は楽天APIを呼び出す
+    // 内蔵DBにない場合はAPIを呼び出す
     setLoading(true);
-    addToast("楽天APIで商品情報を検索中…","info");
+    addToast("商品情報を検索中…","info");
     try {
       const res = await fetch("/api/search?jan=" + encodeURIComponent(code));
       const data = await res.json();
@@ -178,7 +178,7 @@ export default function App() {
       let product;
       if (res.ok && data.name) {
         product = {jan:code, name:data.name, price:data.price||0, cost:0, brand:data.brand||""};
-        addToast("楽天から商品情報を取得しました","ok");
+        addToast("商品情報を取得しました","ok");
       } else {
         // APIでも見つからない場合は手入力
         product = {jan:code, name:"商品 (JAN:"+code+")", price:0, cost:0, brand:""};
