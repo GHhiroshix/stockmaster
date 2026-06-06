@@ -200,7 +200,7 @@ export default function App(){
       </div>
 
       <div style={{background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",padding:"0 16px",overflowX:"auto"}}>
-        {[["inventory","📦 在庫"],["incoming","📥 入庫履歴"],["outgoing","📤 出庫"],["dashboard","📊 グラフ"],["categories","🗂 分類"]].map(it=>(
+        {[["inventory","📦 在庫"],["incoming","📥 入庫履歴"],["outgoing","📤 出庫履歴"],["dashboard","📊 グラフ"],["categories","🗂 分類"]].map(it=>(
           <div key={it[0]} style={{flexShrink:0,padding:"10px 14px",fontSize:13,fontWeight:500,color:tab===it[0]?"#58A6FF":"#8B949E",cursor:"pointer",borderBottom:tab===it[0]?"2px solid #58A6FF":"2px solid transparent"}} onClick={()=>setTab(it[0])}>
             {it[1]}{it[0]==="inventory"&&alerts.length>0&&<span style={{marginLeft:5,background:"#F85149",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:9,fontWeight:700}}>{alerts.length}</span>}
           </div>
