@@ -87,12 +87,21 @@ export default function App(){
   const[incoming,setIncoming]=useState(()=>{try{const s=localStorage.getItem("sm_incoming");return s?JSON.parse(s):INIT_INCOMING;}catch(e){return INIT_INCOMING;}});
   const[outgoing,setOutgoing]=useState(()=>{try{const s=localStorage.getItem("sm_outgoing");return s?JSON.parse(s):INIT_OUTGOING;}catch(e){return INIT_OUTGOING;}});
   const[jan,setJan]=useState("");const[loading,setLoading]=useState(false);
-  const[modal,setModal]=useState(null);const[editModal,setEditModal]=useState(null);
-  const[incomingModal,setIncomingModal]=useState(null);const[outgoingModal,setOutgoingModal]=useState(null);
-  const[arQty,setArQty]=useState(1);const[arCost,setArCost]=useState("");
+  // スキャンモーダル用state
+  const[modal,setModal]=useState(null);        // {product, isNew, existing}
+  const[arMode,setArMode]=useState("incoming");// "incoming" or "outgoing"
+  const[arQty,setArQty]=useState(1);
+  const[arCost,setArCost]=useState("");
   const[arL1,setArL1]=useState("");const[arL2,setArL2]=useState("");const[arL3,setArL3]=useState("");
   const[arMaker,setArMaker]=useState("");const[arSupplier,setArSupplier]=useState("");
-  const[toasts,setToasts]=useState([]);const[fCat,setFCat]=useState("all");const[fTxt,setFTxt]=useState("");
+  const[arSellPrice,setArSellPrice]=useState("");
+  const[arDestination,setArDestination]=useState("");
+  // その他モーダル
+  const[editModal,setEditModal]=useState(null);
+  const[incomingModal,setIncomingModal]=useState(null);
+  const[outgoingModal,setOutgoingModal]=useState(null);
+  const[toasts,setToasts]=useState([]);
+  const[fCat,setFCat]=useState("all");const[fTxt,setFTxt]=useState("");
   const[fInTxt,setFInTxt]=useState("");const[fInFrom,setFInFrom]=useState("");const[fInTo,setFInTo]=useState("");
   const[fOutTxt,setFOutTxt]=useState("");const[fOutFrom,setFOutFrom]=useState("");const[fOutTo,setFOutTo]=useState("");
   const[editItem,setEditItem]=useState(null);const[showCamera,setShowCamera]=useState(false);
@@ -109,46 +118,105 @@ export default function App(){
 
   const addToast=useCallback((msg,type="info")=>{const id=Date.now()+Math.random();setToasts(t=>[...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3400);},[]);
 
+  // ── スキャンモーダルを開く ─────────────────────────────
+  function openScanModal(product, existing){
+    setModal({product, isNew:!existing, existing});
+    setArMode(existing?"incoming":"incoming");
+    setArQty(1);setArCost(String(existing?.cost||""));
+    setArL1(existing?.catL1||"");setArL2(existing?.catL2||"");setArL3(existing?.catL3||"");
+    setArMaker(existing?.maker||"");setArSupplier(existing?.supplier||"");
+    setArSellPrice(String(product.price||""));setArDestination("");
+  }
+
+  // ── JANコード検索 ────────────────────────────────────────
+  const processJan=useCallback(async(code)=>{
+    code=code.trim().replace(/\D/g,"");
+    if(code.length<8){addToast("8〜13桁のJANコードを入力してください","err");return;}
+    const local=PRODUCTS[code];
+    if(local){
+      const existing=db.find(i=>i.jan===code)||null;
+      openScanModal({jan:code,name:local.name,price:local.price,cost:0},existing);
+      setJan("");return;
+    }
+    setLoading(true);addToast("商品情報を検索中…","info");
+    try{
+      const res=await fetch("/api/search?jan="+encodeURIComponent(code));const data=await res.json();
+      const product=res.ok&&data.name?{jan:code,name:data.name,price:data.price||0,cost:0,brand:data.brand||""}:{jan:code,name:"商品 (JAN:"+code+")",price:0,cost:0};
+      if(res.ok&&data.name)addToast("商品情報を取得しました","ok");else addToast("商品が見つかりません。手入力してください","info");
+      const existing=db.find(i=>i.jan===code)||null;
+      openScanModal(product,existing);setJan("");
+    }catch(e){
+      const existing=db.find(i=>i.jan===code)||null;
+      openScanModal({jan:code,name:"商品 (JAN:"+code+")",price:0,cost:0},existing);setJan("");
+      addToast("通信エラー。手入力してください","err");
+    }
+    setLoading(false);
+  },[db,addToast]);
+
+  const handleCameraDetect=useCallback((code)=>{setShowCamera(false);addToast("スキャン成功: "+code,"ok");setTimeout(()=>processJan(code),300);},[processJan,addToast]);
+
+  // ── スキャンモーダル確定 ─────────────────────────────────
+  function confirmScan(){
+    if(!modal)return;
+    const {product,isNew,existing}=modal;
+
+    if(arMode==="incoming"){
+      // 入庫処理
+      const cost=parseInt(arCost)||0;
+      if(isNew){
+        // 新規商品マスタ登録 + 入庫
+        const item={id:Date.now()+1,jan:product.jan,name:product.name,price:product.price,cost,qty:arQty,reorderPoint:5,catL1:arL1,catL2:arL2,catL3:arL3,maker:arMaker,supplier:arSupplier,addedAt:today()};
+        setDb(d=>[item,...d]);
+        addToast("新規登録＋入庫 ("+arQty+"個)","ok");
+      }else{
+        // 既存商品の在庫加算
+        setDb(d=>d.map(i=>i.jan===product.jan?{...i,qty:i.qty+arQty,cost:cost||i.cost,catL1:arL1||i.catL1,catL2:arL2||i.catL2,catL3:arL3||i.catL3,maker:arMaker||i.maker,supplier:arSupplier||i.supplier}:i));
+        addToast("入庫 +"+arQty+"個 (計"+(existing.qty+arQty)+"個)","ok");
+      }
+      // 入庫履歴に追加
+      if(cost>0||!isNew){
+        const rec={id:Date.now(),date:today(),jan:product.jan,name:product.name,qty:arQty,cost:cost||existing?.cost||0,totalCost:arQty*(cost||existing?.cost||0),maker:arMaker||existing?.maker||"",supplier:arSupplier||existing?.supplier||"",note:""};
+        setIncoming(h=>[rec,...h]);
+      }
+
+    }else{
+      // 出庫処理（登録済み商品のみ）
+      if(!existing){addToast("未登録商品は出庫できません","err");return;}
+      const sellPrice=parseInt(arSellPrice)||existing.price||0;
+      if(existing.qty<arQty){
+        if(!window.confirm("在庫が不足しています（現在"+existing.qty+"個）。このまま出庫しますか？"))return;
+      }
+      setDb(d=>d.map(i=>i.jan===product.jan?{...i,qty:Math.max(0,i.qty-arQty)}:i));
+      const rec={id:Date.now(),date:today(),jan:product.jan,name:product.name,qty:arQty,price:sellPrice,totalPrice:arQty*sellPrice,destination:arDestination,note:""};
+      setOutgoing(o=>[rec,...o]);
+      addToast("出庫 -"+arQty+"個 (残"+(Math.max(0,existing.qty-arQty))+"個)","ok");
+    }
+    setModal(null);if(ref.current)ref.current.focus();
+  }
+
   function openAddCat(level,l1id,l2id){setAddCatModal({level,l1id:l1id||null,l2id:l2id||null});setNewCatName("");setNewCatEmoji("📦");}
   function confirmAddCat(){if(!newCatName.trim()){addToast("名前を入力してください","err");return;}const id="c"+Date.now();const{level,l1id,l2id}=addCatModal;if(level===1)setCats(c=>[...c,{id,name:newCatName,emoji:newCatEmoji,children:[]}]);else if(level===2)setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:[...l1.children,{id,name:newCatName,children:[]}]}));else setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:l1.children.map(l2=>l2.id!==l2id?l2:{...l2,children:[...l2.children,{id,name:newCatName}]})}));setAddCatModal(null);addToast("カテゴリーを追加しました","ok");}
   function delL1(l1id){if(!window.confirm("大分類を削除しますか？"))return;setCats(c=>c.filter(l1=>l1.id!==l1id));setDb(d=>d.map(i=>i.catL1===l1id?{...i,catL1:"",catL2:"",catL3:""}:i));addToast("削除しました","info");}
   function delL2(l1id,l2id){if(!window.confirm("中分類を削除しますか？"))return;setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:l1.children.filter(l2=>l2.id!==l2id)}));setDb(d=>d.map(i=>i.catL2===l2id?{...i,catL2:"",catL3:""}:i));addToast("削除しました","info");}
   function delL3(l1id,l2id,l3id){if(!window.confirm("小分類を削除しますか？"))return;setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:l1.children.map(l2=>l2.id!==l2id?l2:{...l2,children:l2.children.filter(l3=>l3.id!==l3id)})}));setDb(d=>d.map(i=>i.catL3===l3id?{...i,catL3:""}:i));addToast("削除しました","info");}
 
-  const processJan=useCallback(async(code)=>{
-    code=code.trim().replace(/\D/g,"");
-    if(code.length<8){addToast("8〜13桁のJANコードを入力してください","err");return;}
-    const local=PRODUCTS[code];
-    if(local){const product={jan:code,name:local.name,price:local.price,cost:0};const existing=db.find(i=>i.jan===code)||null;setModal({product,isNew:!existing,existing});setArQty(1);setArCost("");setArL1("");setArL2("");setArL3("");setArMaker(existing?existing.maker||"":"");setArSupplier(existing?existing.supplier||"":"");setJan("");return;}
-    setLoading(true);addToast("商品情報を検索中…","info");
-    try{
-      const res=await fetch("/api/search?jan="+encodeURIComponent(code));const data=await res.json();
-      const product=res.ok&&data.name?{jan:code,name:data.name,price:data.price||0,cost:0,brand:data.brand||""}:{jan:code,name:"商品 (JAN:"+code+")",price:0,cost:0};
-      if(res.ok&&data.name)addToast("商品情報を取得しました","ok");else addToast("商品が見つかりません。手入力してください","info");
-      const existing=db.find(i=>i.jan===code)||null;setModal({product,isNew:!existing,existing});setArQty(1);setArCost(String(product.cost||""));setArL1("");setArL2("");setArL3("");setArMaker(existing?existing.maker||"":"");setArSupplier(existing?existing.supplier||"":"");setJan("");
-    }catch(e){const existing=db.find(i=>i.jan===code)||null;setModal({product:{jan:code,name:"商品 (JAN:"+code+")",price:0,cost:0},isNew:!existing,existing});setArQty(1);setArCost("");setArL1("");setArL2("");setArL3("");setArMaker("");setArSupplier("");setJan("");addToast("通信エラー。手入力してください","err");}
-    setLoading(false);
-  },[db,addToast]);
-
-  const handleCameraDetect=useCallback((code)=>{setShowCamera(false);addToast("スキャン成功: "+code,"ok");setTimeout(()=>processJan(code),300);},[processJan,addToast]);
-
-  function confirmAdd(){
-    if(!modal)return;const cost=parseInt(arCost)||0;
-    if(modal.isNew){const item={id:Date.now()+1,jan:modal.product.jan,name:modal.product.name,price:modal.product.price,cost,qty:arQty,reorderPoint:5,catL1:arL1,catL2:arL2,catL3:arL3,maker:arMaker,supplier:arSupplier,addedAt:today()};setDb(d=>[item,...d]);addToast("新規登録 ("+arQty+"個)","ok");}
-    else{const prev=modal.existing.qty;setDb(d=>d.map(i=>i.jan===modal.product.jan?{...i,qty:i.qty+arQty,cost:cost||i.cost,catL1:arL1||i.catL1,catL2:arL2||i.catL2,catL3:arL3||i.catL3,maker:arMaker||i.maker,supplier:arSupplier||i.supplier}:i));addToast("在庫+"+arQty+"個 (計"+(modal.existing.qty+arQty)+"個)","ok");}
-    if(cost>0){const rec={id:Date.now(),date:today(),jan:modal.product.jan,name:modal.product.name,qty:arQty,cost,totalCost:arQty*cost,maker:arMaker,supplier:arSupplier,note:""};setIncoming(h=>[rec,...h]);}
-    setModal(null);if(ref.current)ref.current.focus();
+  // 入庫タブの手動追加
+  function confirmAddIncoming(){
+    if(!incomingModal)return;if(!incomingModal.name.trim()){addToast("商品名を入力してください","err");return;}
+    const rec={...incomingModal,id:Date.now(),totalCost:(incomingModal.qty||0)*(incomingModal.cost||0)};
+    setIncoming(h=>[rec,...h]);
+    if(incomingModal.jan){const ex=db.find(i=>i.jan===incomingModal.jan);if(ex)setDb(d=>d.map(i=>i.jan===incomingModal.jan?{...i,qty:i.qty+(incomingModal.qty||0)}:i));}
+    setIncomingModal(null);addToast("入庫履歴を追加（在庫+"+incomingModal.qty+"個）","ok");
   }
 
-  function confirmAddIncoming(){if(!incomingModal)return;if(!incomingModal.name.trim()){addToast("商品名を入力してください","err");return;}const rec={...incomingModal,id:Date.now(),totalCost:(incomingModal.qty||0)*(incomingModal.cost||0)};setIncoming(h=>[rec,...h]);if(incomingModal.jan){const ex=db.find(i=>i.jan===incomingModal.jan);if(ex)setDb(d=>d.map(i=>i.jan===incomingModal.jan?{...i,qty:i.qty+(incomingModal.qty||0)}:i));}setIncomingModal(null);addToast("入庫履歴を追加（在庫+"+incomingModal.qty+"個）","ok");}
-
+  // 出庫タブの手動追加
   function confirmAddOutgoing(){
     if(!outgoingModal)return;if(!outgoingModal.name.trim()){addToast("商品名を入力してください","err");return;}if(!outgoingModal.qty||outgoingModal.qty<1){addToast("出庫数量を入力してください","err");return;}
     const item=db.find(i=>i.jan===outgoingModal.jan);
     if(item&&item.qty<outgoingModal.qty){if(!window.confirm("在庫が不足しています（現在"+item.qty+"個）。このまま出庫しますか？"))return;}
-    if(item){setDb(d=>d.map(i=>i.jan===outgoingModal.jan?{...i,qty:Math.max(0,i.qty-outgoingModal.qty)}:i));}
+    if(item)setDb(d=>d.map(i=>i.jan===outgoingModal.jan?{...i,qty:Math.max(0,i.qty-outgoingModal.qty)}:i));
     const rec={id:Date.now(),date:outgoingModal.date,jan:outgoingModal.jan,name:outgoingModal.name,qty:outgoingModal.qty,price:outgoingModal.price,totalPrice:outgoingModal.qty*outgoingModal.price,destination:outgoingModal.destination,note:outgoingModal.note};
-    setOutgoing(o=>[rec,...o]);setOutgoingModal(null);addToast("出庫を記録しました ("+outgoingModal.qty+"個)","ok");
+    setOutgoing(o=>[rec,...o]);setOutgoingModal(null);addToast("出庫を記録しました（在庫-"+outgoingModal.qty+"個）","ok");
   }
 
   function saveEditModal(){if(!editModal)return;setDb(d=>d.map(i=>i.id===editModal.id?editModal:i));setEditModal(null);addToast("保存しました","ok");}
@@ -178,13 +246,13 @@ export default function App(){
     if(editItem&&editItem.id===item.id&&editItem.field===field){return<input autoFocus type={isNum?"number":"text"} defaultValue={item[field]} style={{...eInp,width:width||80}} onBlur={e=>saveEdit(item.id,field,e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveEdit(item.id,field,e.target.value);if(e.key==="Escape")setEditItem(null);}}/>;}
     return<span style={{cursor:"pointer",fontFamily:mono?"monospace":"inherit"}} onDoubleClick={()=>setEditItem({id:item.id,field})} title="ダブルクリックで編集">{display}</span>;
   }
-
   function FilterBar({from,setFrom,to,setTo,txt,setTxt,placeholder}){
     return(<div style={{background:"#161B22",borderBottom:"1px solid #30363D",padding:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input style={{...inpS,width:130}} type="date" value={from} onChange={e=>setFrom(e.target.value)}/><span style={{color:"#484F58",fontSize:12}}>〜</span><input style={{...inpS,width:130}} type="date" value={to} onChange={e=>setTo(e.target.value)}/><input style={{...inpS,flex:1,minWidth:120}} type="text" placeholder={placeholder} value={txt} onChange={e=>setTxt(e.target.value)}/>{(from||to||txt)&&<button style={btnG} onClick={()=>{setFrom("");setTo("");setTxt("");}}>クリア</button>}</div></div>);
   }
 
   return(
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"#0D1117",color:"#E6EDF3",fontFamily:"system-ui,sans-serif",fontSize:14}}>
+      {/* TOPBAR */}
       <div style={{height:52,background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",position:"sticky",top:0,zIndex:300}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{fontSize:18,fontWeight:800}}>Stock<span style={{color:"#58A6FF"}}>Master</span></div>
@@ -199,6 +267,7 @@ export default function App(){
         </div>
       </div>
 
+      {/* NAV */}
       <div style={{background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",padding:"0 16px",overflowX:"auto"}}>
         {[["inventory","📦 在庫"],["incoming","📥 入庫履歴"],["outgoing","📤 出庫履歴"],["dashboard","📊 グラフ"],["categories","🗂 分類"]].map(it=>(
           <div key={it[0]} style={{flexShrink:0,padding:"10px 14px",fontSize:13,fontWeight:500,color:tab===it[0]?"#58A6FF":"#8B949E",cursor:"pointer",borderBottom:tab===it[0]?"2px solid #58A6FF":"2px solid transparent"}} onClick={()=>setTab(it[0])}>
@@ -207,6 +276,7 @@ export default function App(){
         ))}
       </div>
 
+      {/* 在庫管理タブ */}
       {tab==="inventory"&&(
         <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0}}>
           <div style={{background:"#161B22",borderBottom:"1px solid #30363D",padding:12}}>
@@ -215,6 +285,7 @@ export default function App(){
               <input ref={ref} style={{background:"#1C2128",border:"1px solid #30363D",borderRadius:6,color:"#E6EDF3",fontFamily:"monospace",fontSize:14,padding:"8px 10px",outline:"none",flex:1}} type="text" inputMode="numeric" placeholder="JANコード手入力" value={jan} onChange={e=>setJan(e.target.value.replace(/\D/g,"").slice(0,13))} onKeyDown={e=>{if(e.key==="Enter"&&!loading)processJan(jan);}} maxLength={13}/>
               <button style={{...btnP,opacity:loading||!jan.trim()?0.4:1}} onClick={()=>processJan(jan)} disabled={loading||!jan.trim()}>{loading?"…":"検索"}</button>
             </div>
+            <div style={{marginTop:8,fontSize:11,color:"#484F58"}}>💡 スキャン後に入庫・出庫を選択できます</div>
           </div>
           {alerts.length>0&&<div style={{margin:"10px 16px 0",background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:8,padding:"8px 12px",color:"#F85149",fontSize:13}}>⚠️ <strong>{alerts.length}件</strong>が発注点以下です</div>}
           <div style={{display:"flex",alignItems:"center",gap:6,overflowX:"auto",padding:"10px 16px 4px"}}>
@@ -229,7 +300,7 @@ export default function App(){
             <div style={{display:"flex",gap:6}}>
               <input style={{background:"#21262D",border:"1px solid #30363D",borderRadius:6,color:"#E6EDF3",fontSize:12,padding:"6px 10px",outline:"none",width:120}} placeholder="商品名/JAN…" value={fTxt} onChange={e=>setFTxt(e.target.value)}/>
               <button style={{background:"rgba(63,185,80,.12)",color:"#3FB950",border:"1px solid rgba(63,185,80,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"6px 10px"}} onClick={()=>{exportCSV(db,cats);addToast("CSV出力","ok");}}>⬇ CSV</button>
-              <button style={{background:"rgba(210,153,34,.12)",color:"#D29922",border:"1px solid rgba(210,153,34,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"6px 10px"}} onClick={()=>{exportInventoryCSV(db,cats);addToast("棚卸しCSV出力","ok");}}>📋 棚卸し</button>
+              <button style={{background:"rgba(210,153,34,.12)",color:"#D29922",border:"1px solid rgba(210,153,34,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"6px 10px"}} onClick={()=>{exportInventoryCSV(db,cats);addToast("棚卸しCSV","ok");}}>📋 棚卸し</button>
             </div>
           </div>
           {isMobile?(
@@ -269,6 +340,7 @@ export default function App(){
         </div>
       )}
 
+      {/* 入庫履歴タブ */}
       {tab==="incoming"&&(
         <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0}}>
           <FilterBar from={fInFrom} setFrom={setFInFrom} to={fInTo} setTo={setFInTo} txt={fInTxt} setTxt={setFInTxt} placeholder="商品名/JAN/仕入れ先…"/>
@@ -284,7 +356,7 @@ export default function App(){
               isMobile?(
                 <div>{inRows.map(h=>(
                   <div key={h.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:10,padding:14,marginBottom:10}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:"monospace",fontSize:12,color:"#3FB950",fontWeight:600}}>📥 {h.date}</span><button style={btnD} onClick={()=>{if(h.jan){const ex=db.find(i=>i.jan===h.jan);if(ex)setDb(d=>d.map(i=>i.jan===h.jan?{...i,qty:Math.max(0,i.qty-(h.qty||0))}:i));}setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました（在庫-"+h.qty+"個）","info");}}>削除</button></div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:"monospace",fontSize:12,color:"#3FB950",fontWeight:600}}>📥 {h.date}</span><button style={btnD} onClick={()=>{if(h.jan){const ex=db.find(i=>i.jan===h.jan);if(ex)setDb(d=>d.map(i=>i.jan===h.jan?{...i,qty:Math.max(0,i.qty-(h.qty||0))}:i));}setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました","info");}}>削除</button></div>
                     <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>{h.name}</div>
                     <div style={{fontFamily:"monospace",fontSize:10,color:"#484F58",marginBottom:8}}>{h.jan}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
@@ -311,7 +383,7 @@ export default function App(){
                         <td style={{...tdS,color:"#8B949E"}}>{h.maker||"—"}</td>
                         <td style={{...tdS,color:"#8B949E"}}>{h.supplier||"—"}</td>
                         <td style={{...tdS,color:"#484F58"}}>{h.note||"—"}</td>
-                        <td style={tdS}><button style={btnD} onClick={()=>{if(h.jan){const ex=db.find(i=>i.jan===h.jan);if(ex)setDb(d=>d.map(i=>i.jan===h.jan?{...i,qty:Math.max(0,i.qty-(h.qty||0))}:i));}setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました（在庫-"+h.qty+"個）","info");}}>削除</button></td>
+                        <td style={tdS}><button style={btnD} onClick={()=>{if(h.jan){const ex=db.find(i=>i.jan===h.jan);if(ex)setDb(d=>d.map(i=>i.jan===h.jan?{...i,qty:Math.max(0,i.qty-(h.qty||0))}:i));}setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました","info");}}>削除</button></td>
                       </tr>
                     ))}</tbody>
                   </table>
@@ -322,22 +394,23 @@ export default function App(){
         </div>
       )}
 
+      {/* 出庫履歴タブ */}
       {tab==="outgoing"&&(
         <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0}}>
           <FilterBar from={fOutFrom} setFrom={setFOutFrom} to={fOutTo} setTo={setFOutTo} txt={fOutTxt} setTxt={setFOutTxt} placeholder="商品名/JAN/販売先…"/>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px 6px"}}>
             <div style={{fontSize:14,fontWeight:700}}>📤 出庫履歴 <span style={{fontSize:12,color:"#484F58",fontWeight:400}}>({outRows.length}件 / <span style={{color:"#58A6FF",fontWeight:600}}>{fmtY(outTotalPrice)}</span>)</span></div>
             <div style={{display:"flex",gap:6}}>
-              <button style={{...btnP,background:"#8B5CF6"}} onClick={()=>setOutgoingModal({date:today(),jan:"",name:"",qty:1,price:0,totalPrice:0,destination:"",note:""})}>+ 出庫を記録</button>
+              <button style={{...btnP,background:"#8B5CF6"}} onClick={()=>setOutgoingModal({date:today(),jan:"",name:"",qty:1,price:0,totalPrice:0,destination:"",note:""})}>+ 手動追加</button>
               <button style={{background:"rgba(88,166,255,.12)",color:"#58A6FF",border:"1px solid rgba(88,166,255,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"6px 10px"}} onClick={()=>{exportOutgoingCSV(outRows);addToast("CSV出力","ok");}}>⬇ CSV</button>
             </div>
           </div>
           <div style={{flex:1,overflow:"auto",padding:"0 16px 20px"}}>
-            {outRows.length===0?<div style={{padding:"40px 20px",textAlign:"center",color:"#484F58"}}><div style={{fontSize:40}}>📤</div>出庫履歴がありません<div style={{fontSize:13,marginTop:8,color:"#484F58"}}>「+ 出庫を記録」で出庫を記録すると在庫数が自動で減ります</div></div>:(
+            {outRows.length===0?<div style={{padding:"40px 20px",textAlign:"center",color:"#484F58"}}><div style={{fontSize:40}}>📤</div>出庫履歴がありません<div style={{fontSize:13,marginTop:8}}>📦 在庫タブでスキャン → 出庫を選択して記録できます</div></div>:(
               isMobile?(
                 <div>{outRows.map(o=>(
                   <div key={o.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:10,padding:14,marginBottom:10}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:"monospace",fontSize:12,color:"#8B5CF6",fontWeight:600}}>📤 {o.date}</span><button style={btnD} onClick={()=>{if(o.jan){const ex=db.find(i=>i.jan===o.jan);if(ex)setDb(d=>d.map(i=>i.jan===o.jan?{...i,qty:i.qty+(o.qty||0)}:i));}setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました（在庫+"+o.qty+"個）","info");}}>削除</button></div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:"monospace",fontSize:12,color:"#8B5CF6",fontWeight:600}}>📤 {o.date}</span><button style={btnD} onClick={()=>{if(o.jan){const ex=db.find(i=>i.jan===o.jan);if(ex)setDb(d=>d.map(i=>i.jan===o.jan?{...i,qty:i.qty+(o.qty||0)}:i));}setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました","info");}}>削除</button></div>
                     <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>{o.name}</div>
                     <div style={{fontFamily:"monospace",fontSize:10,color:"#484F58",marginBottom:8}}>{o.jan}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
@@ -363,7 +436,7 @@ export default function App(){
                         <td style={{...tdS,fontFamily:"monospace",fontWeight:700,color:"#58A6FF",textAlign:"right"}}>{fmtY(o.totalPrice)}</td>
                         <td style={{...tdS,color:"#8B949E"}}>{o.destination||"—"}</td>
                         <td style={{...tdS,color:"#484F58"}}>{o.note||"—"}</td>
-                        <td style={tdS}><button style={btnD} onClick={()=>{if(o.jan){const ex=db.find(i=>i.jan===o.jan);if(ex)setDb(d=>d.map(i=>i.jan===o.jan?{...i,qty:i.qty+(o.qty||0)}:i));}setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました（在庫+"+o.qty+"個）","info");}}>削除</button></td>
+                        <td style={tdS}><button style={btnD} onClick={()=>{if(o.jan){const ex=db.find(i=>i.jan===o.jan);if(ex)setDb(d=>d.map(i=>i.jan===o.jan?{...i,qty:i.qty+(o.qty||0)}:i));}setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました","info");}}>削除</button></td>
                       </tr>
                     ))}</tbody>
                   </table>
@@ -374,6 +447,7 @@ export default function App(){
         </div>
       )}
 
+      {/* グラフタブ */}
       {tab==="dashboard"&&(
         <div style={{padding:16,display:"flex",flexDirection:"column",gap:14}}>
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
@@ -385,24 +459,17 @@ export default function App(){
             <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14}}><div style={{fontSize:11,color:"#484F58",marginBottom:4}}>今月の入庫合計</div><div style={{fontFamily:"monospace",fontSize:18,fontWeight:600,color:"#3FB950"}}>{fmtY(incoming.filter(h=>h.date.slice(0,7)===today().slice(0,7)).reduce((s,h)=>s+h.totalCost,0))}</div></div>
             <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14}}><div style={{fontSize:11,color:"#484F58",marginBottom:4}}>今月の出庫合計売上</div><div style={{fontFamily:"monospace",fontSize:18,fontWeight:600,color:"#58A6FF"}}>{fmtY(outgoing.filter(o=>o.date.slice(0,7)===today().slice(0,7)).reduce((s,o)=>s+o.totalPrice,0))}</div></div>
           </div>
-          <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16}}>
-            <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>大分類別 在庫評価額</div>
-            {cats.map(cat=>{const val=db.filter(i=>i.catL1===cat.id).reduce((s,i)=>s+i.price*i.qty,0);if(!val)return null;return<div key={cat.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><div style={{width:90,fontSize:11,color:"#8B949E",textAlign:"right"}}>{cat.emoji} {cat.name}</div><div style={{flex:1,height:16,background:"#1C2128",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(100,val/totalV*100)+"%",background:"#58A6FF",borderRadius:3}}/></div><div style={{width:70,fontFamily:"monospace",fontSize:10,color:"#8B949E"}}>{fmtY(val)}</div></div>;})}
-          </div>
-          <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16}}>
-            <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>商品別 粗利率ランキング</div>
-            {db.filter(i=>i.cost).sort((a,b)=>calcM(b.price,b.cost)-calcM(a.price,a.cost)).slice(0,6).map(item=>{const m=calcM(item.price,item.cost);return<div key={item.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><div style={{width:90,fontSize:10,color:"#8B949E",textAlign:"right"}}>{item.name.slice(0,9)}{item.name.length>9?"…":""}</div><div style={{flex:1,height:16,background:"#1C2128",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:m+"%",background:mCol(m),borderRadius:3}}/></div><div style={{width:36,fontFamily:"monospace",fontSize:10,color:mCol(m),fontWeight:700}}>{m}%</div></div>;})}
+          <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16}}><div style={{fontSize:13,fontWeight:700,marginBottom:12}}>大分類別 在庫評価額</div>{cats.map(cat=>{const val=db.filter(i=>i.catL1===cat.id).reduce((s,i)=>s+i.price*i.qty,0);if(!val)return null;return<div key={cat.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><div style={{width:90,fontSize:11,color:"#8B949E",textAlign:"right"}}>{cat.emoji} {cat.name}</div><div style={{flex:1,height:16,background:"#1C2128",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(100,val/totalV*100)+"%",background:"#58A6FF",borderRadius:3}}/></div><div style={{width:70,fontFamily:"monospace",fontSize:10,color:"#8B949E"}}>{fmtY(val)}</div></div>;})}</div>
+          <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16}}><div style={{fontSize:13,fontWeight:700,marginBottom:12}}>商品別 粗利率ランキング</div>{db.filter(i=>i.cost).sort((a,b)=>calcM(b.price,b.cost)-calcM(a.price,a.cost)).slice(0,6).map(item=>{const m=calcM(item.price,item.cost);return<div key={item.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><div style={{width:90,fontSize:10,color:"#8B949E",textAlign:"right"}}>{item.name.slice(0,9)}{item.name.length>9?"…":""}</div><div style={{flex:1,height:16,background:"#1C2128",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:m+"%",background:mCol(m),borderRadius:3}}/></div><div style={{width:36,fontFamily:"monospace",fontSize:10,color:mCol(m),fontWeight:700}}>{m}%</div></div>;})}
           </div>
           {alerts.length>0&&<div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16}}><div style={{fontSize:13,fontWeight:700,marginBottom:12}}>⚠️ 発注アラート</div>{alerts.map(item=><div key={item.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #30363D",fontSize:12}}><div>{item.name.slice(0,16)}{item.name.length>16?"…":""}</div><div style={{display:"flex",gap:12,fontFamily:"monospace",fontSize:11}}><span style={{color:"#F85149",fontWeight:700}}>在庫:{item.qty}</span><span style={{color:"#484F58"}}>発注点:{item.reorderPoint||0}</span></div></div>)}</div>}
         </div>
       )}
 
+      {/* 分類タブ */}
       {tab==="categories"&&(
         <div style={{padding:16}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontSize:16,fontWeight:700}}>カテゴリー管理</div>
-            <button style={btnP} onClick={()=>openAddCat(1)}>+ 大分類を追加</button>
-          </div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontSize:16,fontWeight:700}}>カテゴリー管理</div><button style={btnP} onClick={()=>openAddCat(1)}>+ 大分類を追加</button></div>
           {cats.map(l1=>(
             <div key={l1.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -422,38 +489,86 @@ export default function App(){
 
       {showCamera&&<CameraScanner onDetected={handleCameraDetect} onClose={()=>setShowCamera(false)}/>}
 
+      {/* ★ スキャンモーダル（入庫・出庫 統合） */}
       {modal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>{if(e.target===e.currentTarget)setModal(null);}}>
-          <div style={{background:"#161B22",border:"1px solid #444C56",borderRadius:10,width:"100%",maxWidth:480,boxShadow:"0 20px 60px rgba(0,0,0,.5)",maxHeight:"90vh",overflowY:"auto"}}>
-            <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"#161B22"}}><div style={{fontSize:14,fontWeight:700}}>{modal.isNew?"✨ 新規商品を登録":"📦 在庫を追加"}</div><button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setModal(null)}>×</button></div>
-            <div style={{padding:"14px 16px"}}>
-              <div style={{background:modal.isNew?"rgba(63,185,80,.12)":"rgba(88,166,255,.1)",borderRadius:7,padding:"8px 12px",fontSize:12,color:modal.isNew?"#3FB950":"#58A6FF",fontWeight:600,marginBottom:12}}>{modal.isNew?"🆕 未登録: 新規登録します":"🔄 登録済み (現在 "+modal.existing.qty+"個) → 在庫加算"}</div>
-              <div style={{background:"#1C2128",borderRadius:7,padding:12,marginBottom:12,border:"1px solid #30363D"}}>
-                <div style={{marginBottom:8}}><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div><input style={inpS} type="text" value={modal.product.name} onChange={e=>{const v=e.target.value;setModal(m=>({...m,product:{...m.product,name:v}}));}}/></div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                  <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>単価（円）</div><input style={inpS} type="number" min="0" value={modal.product.price} onChange={e=>{const v=e.target.value;setModal(m=>({...m,product:{...m.product,price:Number(v)||0}}));}}/></div>
-                  <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>JAN</div><div style={{fontFamily:"monospace",fontSize:12,color:"#484F58",padding:"9px 10px",background:"#0D1117",borderRadius:6,border:"1px solid #30363D"}}>{modal.product.jan}</div></div>
-                </div>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>{if(e.target===e.currentTarget)setModal(null);}}>
+          <div style={{background:"#161B22",border:"1px solid #444C56",borderRadius:12,width:"100%",maxWidth:480,boxShadow:"0 20px 60px rgba(0,0,0,.6)",maxHeight:"92vh",overflowY:"auto"}}>
+            {/* ヘッダー */}
+            <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"#161B22"}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:700}}>{modal.product.name.slice(0,24)}{modal.product.name.length>24?"…":""}</div>
+                <div style={{fontFamily:"monospace",fontSize:10,color:"#484F58",marginTop:2}}>{modal.product.jan}</div>
               </div>
-              {modal.isNew&&(<>
-                <div style={{marginBottom:12}}><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ値（円）</div><input style={inpS} type="number" min="0" placeholder="0" value={arCost} onChange={e=>setArCost(e.target.value)}/>{arCost&&calcM(modal.product.price,Number(arCost))!==null&&<div style={{fontSize:10,color:"#484F58",marginTop:2}}>粗利率: <span style={{fontWeight:700,color:mCol(calcM(modal.product.price,Number(arCost)))}}>{calcM(modal.product.price,Number(arCost))}%</span></div>}</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div><input style={inpS} type="text" placeholder="例：ユニ・チャーム" value={arMaker} onChange={e=>setArMaker(e.target.value)}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div><input style={inpS} type="text" placeholder="例：〇〇商事" value={arSupplier} onChange={e=>setArSupplier(e.target.value)}/></div></div>
-                <div style={{marginBottom:12}}><CategorySelect cats={cats} l1={arL1} l2={arL2} l3={arL3} onChange={(l1,l2,l3)=>{setArL1(l1);setArL2(l2);setArL3(l3);}} inpS={inpS}/></div>
-              </>)}
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#1C2128",borderRadius:7,padding:"10px 14px",border:"1px solid #30363D"}}>
-                <span style={{fontSize:12,color:"#8B949E"}}>入庫数量</span>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <button style={{width:32,height:32,border:"1px solid #444C56",borderRadius:7,background:"#2D333B",color:"#E6EDF3",cursor:"pointer",fontSize:18}} onClick={()=>setArQty(q=>Math.max(1,q-1))}>-</button>
-                  <span style={{fontFamily:"monospace",fontSize:22,fontWeight:700,minWidth:40,textAlign:"center"}}>{arQty}</span>
-                  <button style={{width:32,height:32,border:"1px solid #444C56",borderRadius:7,background:"#2D333B",color:"#E6EDF3",cursor:"pointer",fontSize:18}} onClick={()=>setArQty(q=>q+1)}>+</button>
+              <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:20}} onClick={()=>setModal(null)}>×</button>
+            </div>
+
+            {/* 現在庫 & 入庫/出庫 切り替えタブ */}
+            <div style={{padding:"12px 16px",background:"#1C2128",borderBottom:"1px solid #30363D"}}>
+              {modal.existing?(
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                  <span style={{fontSize:12,color:"#8B949E"}}>現在庫</span>
+                  <span style={{fontFamily:"monospace",fontSize:22,fontWeight:700,color:modal.existing.qty<=0?"#F85149":modal.existing.qty<=5?"#D29922":"#3FB950"}}>{modal.existing.qty}<span style={{fontSize:12,fontWeight:400,color:"#8B949E",marginLeft:4}}>個</span></span>
                 </div>
+              ):(
+                <div style={{background:"rgba(63,185,80,.1)",border:"1px solid rgba(63,185,80,.3)",borderRadius:6,padding:"6px 10px",fontSize:11,color:"#3FB950",marginBottom:10}}>🆕 未登録商品 — 入庫で新規登録されます</div>
+              )}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <button style={{padding:"10px 0",borderRadius:8,border:"none",cursor:"pointer",fontWeight:700,fontSize:14,background:arMode==="incoming"?"#238636":"#21262D",color:arMode==="incoming"?"#fff":"#8B949E",transition:"all .15s"}} onClick={()=>setArMode("incoming")}>📥 入庫</button>
+                <button style={{padding:"10px 0",borderRadius:8,border:"none",cursor:modal.isNew?"not-allowed":"pointer",fontWeight:700,fontSize:14,background:arMode==="outgoing"&&!modal.isNew?"#8B5CF6":"#21262D",color:arMode==="outgoing"&&!modal.isNew?"#fff":modal.isNew?"#484F58":"#8B949E",transition:"all .15s"}} onClick={()=>!modal.isNew&&setArMode("outgoing")} disabled={modal.isNew}>{modal.isNew?"📤 出庫（登録後）":"📤 出庫"}</button>
               </div>
             </div>
-            <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}><button style={btnG} onClick={()=>setModal(null)}>キャンセル</button><button style={btnP} onClick={confirmAdd}>{modal.isNew?"✨ 新規登録する":"📦 在庫を加算する"}</button></div>
+
+            <div style={{padding:"14px 16px"}}>
+              {/* 数量セレクター（共通） */}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#1C2128",borderRadius:8,padding:"12px 16px",marginBottom:14,border:"1px solid #30363D"}}>
+                <span style={{fontSize:13,color:"#8B949E",fontWeight:600}}>{arMode==="incoming"?"入庫数量":"出庫数量"}</span>
+                <div style={{display:"flex",alignItems:"center",gap:14}}>
+                  <button style={{width:36,height:36,border:"1px solid #444C56",borderRadius:8,background:"#2D333B",color:"#E6EDF3",cursor:"pointer",fontSize:20,fontWeight:700}} onClick={()=>setArQty(q=>Math.max(1,q-1))}>−</button>
+                  <span style={{fontFamily:"monospace",fontSize:28,fontWeight:700,minWidth:48,textAlign:"center"}}>{arQty}</span>
+                  <button style={{width:36,height:36,border:"1px solid #444C56",borderRadius:8,background:"#2D333B",color:"#E6EDF3",cursor:"pointer",fontSize:20,fontWeight:700}} onClick={()=>setArQty(q=>q+1)}>＋</button>
+                </div>
+              </div>
+
+              {/* 入庫フォーム */}
+              {arMode==="incoming"&&(
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>販売単価（円）</div><input style={inpS} type="number" min="0" value={modal.product.price} onChange={e=>{const v=e.target.value;setModal(m=>({...m,product:{...m.product,price:Number(v)||0}}));}}/></div>
+                    <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ値（円）</div><input style={inpS} type="number" min="0" placeholder="0" value={arCost} onChange={e=>setArCost(e.target.value)}/></div>
+                  </div>
+                  {arCost&&calcM(modal.product.price,Number(arCost))!==null&&<div style={{fontSize:11,color:"#484F58",textAlign:"right"}}>粗利率: <span style={{fontWeight:700,color:mCol(calcM(modal.product.price,Number(arCost)))}}>{calcM(modal.product.price,Number(arCost))}%</span></div>}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div><input style={inpS} type="text" placeholder="例：ユニ・チャーム" value={arMaker} onChange={e=>setArMaker(e.target.value)}/></div>
+                    <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div><input style={inpS} type="text" placeholder="例：〇〇商事" value={arSupplier} onChange={e=>setArSupplier(e.target.value)}/></div>
+                  </div>
+                  {modal.isNew&&<CategorySelect cats={cats} l1={arL1} l2={arL2} l3={arL3} onChange={(l1,l2,l3)=>{setArL1(l1);setArL2(l2);setArL3(l3);}} inpS={inpS}/>}
+                </div>
+              )}
+
+              {/* 出庫フォーム */}
+              {arMode==="outgoing"&&!modal.isNew&&(
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {modal.existing&&modal.existing.qty<arQty&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 10px",fontSize:12,color:"#F85149"}}>⚠ 在庫不足（現在{modal.existing.qty}個）</div>}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>販売単価（円）</div><input style={inpS} type="number" min="0" value={arSellPrice} onChange={e=>setArSellPrice(e.target.value)}/></div>
+                    <div style={{display:"flex",alignItems:"flex-end",paddingBottom:2}}><div style={{fontSize:12,color:"#8B949E"}}>合計: <span style={{fontFamily:"monospace",fontWeight:700,color:"#58A6FF",fontSize:14}}>{fmtY((parseInt(arSellPrice)||0)*arQty)}</span></div></div>
+                  </div>
+                  <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>販売先・出荷先</div><input style={inpS} type="text" placeholder="例：〇〇施設、Amazon等" value={arDestination} onChange={e=>setArDestination(e.target.value)}/></div>
+                </div>
+              )}
+            </div>
+
+            <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}>
+              <button style={btnG} onClick={()=>setModal(null)}>キャンセル</button>
+              <button style={{...btnP,background:arMode==="incoming"?"#238636":"#8B5CF6",minWidth:140}} onClick={confirmScan}>
+                {arMode==="incoming"?(modal.isNew?"✨ 新規登録＋入庫":"📥 入庫する ("+arQty+"個)"):"📤 出庫する ("+arQty+"個)"}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
+      {/* 編集モーダル */}
       {editModal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>{if(e.target===e.currentTarget)setEditModal(null);}}>
           <div style={{background:"#161B22",border:"1px solid #444C56",borderRadius:10,width:"100%",maxWidth:480,boxShadow:"0 20px 60px rgba(0,0,0,.5)",maxHeight:"90vh",overflowY:"auto"}}>
@@ -470,10 +585,11 @@ export default function App(){
         </div>
       )}
 
+      {/* 入庫 手動追加モーダル */}
       {incomingModal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>{if(e.target===e.currentTarget)setIncomingModal(null);}}>
           <div style={{background:"#161B22",border:"1px solid #444C56",borderRadius:10,width:"100%",maxWidth:480,boxShadow:"0 20px 60px rgba(0,0,0,.5)",maxHeight:"90vh",overflowY:"auto"}}>
-            <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"#161B22"}}><div style={{fontSize:14,fontWeight:700}}>📥 入庫履歴を追加</div><button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setIncomingModal(null)}>×</button></div>
+            <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"#161B22"}}><div style={{fontSize:14,fontWeight:700}}>📥 入庫履歴を手動追加</div><button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setIncomingModal(null)}>×</button></div>
             <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>入庫日</div><input style={inpS} type="date" value={incomingModal.date} onChange={e=>setIncomingModal(m=>({...m,date:e.target.value}))}/></div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div><input style={inpS} type="text" placeholder="商品名を入力" value={incomingModal.name} onChange={e=>setIncomingModal(m=>({...m,name:e.target.value}))}/><select style={{...inpS,marginTop:4,fontSize:11}} onChange={e=>{const item=db.find(i=>i.id===Number(e.target.value));if(item)setIncomingModal(m=>({...m,jan:item.jan,name:item.name,cost:item.cost||0,maker:item.maker||"",supplier:item.supplier||"",totalCost:(m.qty||1)*(item.cost||0)}));}}><option value="">← 商品マスタから選択</option>{db.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
@@ -488,28 +604,25 @@ export default function App(){
         </div>
       )}
 
+      {/* 出庫 手動追加モーダル */}
       {outgoingModal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>{if(e.target===e.currentTarget)setOutgoingModal(null);}}>
           <div style={{background:"#161B22",border:"1px solid #444C56",borderRadius:10,width:"100%",maxWidth:480,boxShadow:"0 20px 60px rgba(0,0,0,.5)",maxHeight:"90vh",overflowY:"auto"}}>
-            <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"#161B22"}}><div style={{fontSize:14,fontWeight:700}}>📤 出庫を記録</div><button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setOutgoingModal(null)}>×</button></div>
+            <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"#161B22"}}><div style={{fontSize:14,fontWeight:700}}>📤 出庫履歴を手動追加</div><button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setOutgoingModal(null)}>×</button></div>
             <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
-              <div style={{background:"rgba(139,92,246,.1)",border:"1px solid rgba(139,92,246,.3)",borderRadius:7,padding:"8px 12px",fontSize:12,color:"#8B5CF6"}}>出庫を記録すると在庫数が自動的に減ります</div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>出庫日</div><input style={inpS} type="date" value={outgoingModal.date} onChange={e=>setOutgoingModal(m=>({...m,date:e.target.value}))}/></div>
-              <div>
-                <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品</div>
-                <select style={inpS} onChange={e=>{const item=db.find(i=>i.id===Number(e.target.value));if(item)setOutgoingModal(m=>({...m,jan:item.jan,name:item.name,price:item.price||0,totalPrice:(m.qty||1)*(item.price||0)}));}}><option value="">商品マスタから選択</option>{db.map(i=><option key={i.id} value={i.id}>{i.name}（在庫: {i.qty}個）</option>)}</select>
-                {outgoingModal.jan&&<div style={{marginTop:6,background:"#1C2128",borderRadius:6,padding:"8px 10px",fontSize:12}}><span style={{fontFamily:"monospace",fontSize:10,color:"#484F58"}}>{outgoingModal.jan}</span>{db.find(i=>i.jan===outgoingModal.jan)&&<span style={{marginLeft:8,fontWeight:600,color:db.find(i=>i.jan===outgoingModal.jan).qty<=(outgoingModal.qty||1)?"#F85149":"#3FB950"}}>現在在庫: {db.find(i=>i.jan===outgoingModal.jan).qty}個</span>}</div>}
-              </div>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品</div><select style={inpS} onChange={e=>{const item=db.find(i=>i.id===Number(e.target.value));if(item)setOutgoingModal(m=>({...m,jan:item.jan,name:item.name,price:item.price||0,totalPrice:(m.qty||1)*(item.price||0)}));}}><option value="">商品マスタから選択</option>{db.map(i=><option key={i.id} value={i.id}>{i.name}（在庫: {i.qty}個）</option>)}</select>{outgoingModal.jan&&db.find(i=>i.jan===outgoingModal.jan)&&<div style={{marginTop:4,fontSize:11,color:"#8B949E"}}>現在庫: <span style={{fontWeight:700,color:db.find(i=>i.jan===outgoingModal.jan).qty<=(outgoingModal.qty||1)?"#F85149":"#3FB950"}}>{db.find(i=>i.jan===outgoingModal.jan).qty}個</span></div>}</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>出庫数量</div><input style={inpS} type="number" min="1" value={outgoingModal.qty} onChange={e=>setOutgoingModal(m=>({...m,qty:Number(e.target.value)||1,totalPrice:(Number(e.target.value)||1)*(m.price||0)}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>販売単価（円）</div><input style={inpS} type="number" min="0" value={outgoingModal.price} onChange={e=>setOutgoingModal(m=>({...m,price:Number(e.target.value)||0,totalPrice:(m.qty||1)*(Number(e.target.value)||0)}))}/></div></div>
               <div style={{background:"#1C2128",borderRadius:6,padding:"8px 12px",fontSize:12}}>合計売上: <span style={{fontFamily:"monospace",fontWeight:700,color:"#58A6FF",fontSize:14}}>{fmtY(outgoingModal.totalPrice)}</span></div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>販売先・出荷先</div><input style={inpS} type="text" placeholder="例：〇〇施設、Amazon等" value={outgoingModal.destination} onChange={e=>setOutgoingModal(m=>({...m,destination:e.target.value}))}/></div>
-              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>備考</div><input style={inpS} type="text" placeholder="メモなど" value={outgoingModal.note} onChange={e=>setOutgoingModal(m=>({...m,note:e.target.value}))}/></div>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>備考</div><input style={inpS} type="text" value={outgoingModal.note} onChange={e=>setOutgoingModal(m=>({...m,note:e.target.value}))}/></div>
             </div>
             <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}><button style={btnG} onClick={()=>setOutgoingModal(null)}>キャンセル</button><button style={{...btnP,background:"#8B5CF6"}} onClick={confirmAddOutgoing}>📤 出庫を記録する</button></div>
           </div>
         </div>
       )}
 
+      {/* カテゴリー追加モーダル */}
       {addCatModal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>{if(e.target===e.currentTarget)setAddCatModal(null);}}>
           <div style={{background:"#161B22",border:"1px solid #444C56",borderRadius:10,width:"100%",maxWidth:380,boxShadow:"0 20px 60px rgba(0,0,0,.5)"}}>
@@ -520,6 +633,7 @@ export default function App(){
         </div>
       )}
 
+      {/* トースト */}
       <div style={{position:"fixed",bottom:18,right:16,display:"flex",flexDirection:"column",gap:7,zIndex:999}}>
         {toasts.map(t=><div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:7,fontSize:12,fontWeight:500,background:"#2D333B",color:"#E6EDF3",borderLeft:"3px solid "+(t.type==="ok"?"#3FB950":t.type==="err"?"#F85149":"#58A6FF"),boxShadow:"0 6px 20px rgba(0,0,0,.4)",minWidth:180}}>{t.type==="ok"?"✓":t.type==="err"?"✕":"ℹ"} {t.msg}</div>)}
       </div>
