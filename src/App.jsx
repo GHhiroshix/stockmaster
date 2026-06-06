@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
-// ── カテゴリーツリー（大分類・中分類・小分類）────────────────────
-const CATS = [
+// ── 初期カテゴリーデータ ──────────────────────────────
+const CATS_INITIAL = [
   { id:"c1", name:"介護用品", emoji:"🏥", children:[
     { id:"c1-1", name:"排泄ケア", children:[
       { id:"c1-1-1", name:"紙おむつ（パンツ型）" },
@@ -86,6 +86,8 @@ const CATS = [
   ]},
 ];
 
+const EMOJIS = ["🏥","💊","🧴","🍱","💻","📦","🏠","🚗","👗","🎮","🍎","🔧","📚","💄","🎵","🏃"];
+
 const PRODUCTS = {
   "4901777317895": { name:"コカ・コーラ 500ml", price:180, brand:"コカ・コーラ" },
   "4571245494429": { name:"キリン一番搾り 350ml×24本", price:3980, brand:"キリン" },
@@ -97,30 +99,46 @@ const PRODUCTS = {
 };
 
 const INIT_DB = [
-  { id:1, jan:"4903111540938", name:"ライフリー うす型軽快パンツ M", price:5236, cost:3500, qty:10, reorderPoint:5, catL1:"c1", catL2:"c1-1", catL3:"c1-1-1", supplier:"ユニ・チャーム", addedAt:"2026-04-01" },
-  { id:2, jan:"4902430457286", name:"アリエール 洗濯洗剤 詰替 900g",  price:398,  cost:220,  qty:24, reorderPoint:10, catL1:"c3", catL2:"c3-1", catL3:"c3-1-1", supplier:"P&G Japan",   addedAt:"2026-04-05" },
-  { id:3, jan:"4902102114775", name:"ポカリスエット 500ml",           price:160,  cost:90,   qty:48, reorderPoint:24, catL1:"c4", catL2:"c4-1", catL3:"c4-1-2", supplier:"大塚製薬",   addedAt:"2026-04-10" },
-  { id:4, jan:"4549660566175", name:"ソニー WF-1000XM5 イヤホン",    price:39600, cost:24500, qty:2, reorderPoint:3,  catL1:"c5", catL2:"c5-2", catL3:"c5-2-3", supplier:"ソニー販売",  addedAt:"2026-04-12" },
+  { id:1, jan:"4903111540938", name:"ライフリー うす型軽快パンツ M", price:5236, cost:3500, qty:10, reorderPoint:5, catL1:"c1", catL2:"c1-1", catL3:"c1-1-1", maker:"ユニ・チャーム", supplier:"ユニ・チャーム直販", addedAt:"2026-04-01" },
+  { id:2, jan:"4902430457286", name:"アリエール 洗濯洗剤 詰替 900g",  price:398,  cost:220,  qty:24, reorderPoint:10, catL1:"c3", catL2:"c3-1", catL3:"c3-1-1", maker:"P&G",           supplier:"P&G Japan",   addedAt:"2026-04-05" },
+  { id:3, jan:"4902102114775", name:"ポカリスエット 500ml",           price:160,  cost:90,   qty:48, reorderPoint:24, catL1:"c4", catL2:"c4-1", catL3:"c4-1-2", maker:"大塚製薬",       supplier:"大塚物流",    addedAt:"2026-04-10" },
+  { id:4, jan:"4549660566175", name:"ソニー WF-1000XM5 イヤホン",    price:39600, cost:24500, qty:2, reorderPoint:3,  catL1:"c5", catL2:"c5-2", catL3:"c5-2-3", maker:"SONY",          supplier:"ソニー販売",  addedAt:"2026-04-12" },
 ];
+
+// ── カテゴリーヘルパー ────────────────────────────────
+function findL1(cats, id) { return cats.find(c => c.id===id) || null; }
+function findL2(cats, l1id, l2id) { const l1=findL1(cats,l1id); return l1?(l1.children.find(c=>c.id===l2id)||null):null; }
+function findL3(cats, l1id, l2id, l3id) { const l2=findL2(cats,l1id,l2id); return l2?(l2.children.find(c=>c.id===l3id)||null):null; }
+function catLabel(cats, l1id, l2id, l3id) {
+  return [findL1(cats,l1id)?.name, findL2(cats,l1id,l2id)?.name, findL3(cats,l1id,l2id,l3id)?.name].filter(Boolean).join(" › ") || "未分類";
+}
 
 function fmtY(n) { return "¥" + Number(n||0).toLocaleString(); }
 function calcM(p,c) { if(!p||!c) return null; return Math.round((p-c)/p*100); }
 function mCol(m) { if(m===null) return "#666"; if(m>=30) return "#3FB950"; if(m>=10) return "#D29922"; return "#F85149"; }
-function findL1(id) { return CATS.find(c => c.id===id) || null; }
-function findL2(l1id,l2id) { const l1=findL1(l1id); return l1?(l1.children.find(c=>c.id===l2id)||null):null; }
-function findL3(l1id,l2id,l3id) { const l2=findL2(l1id,l2id); return l2?(l2.children.find(c=>c.id===l3id)||null):null; }
-function catLabel(l1id,l2id,l3id) {
-  return [findL1(l1id)?.name, findL2(l1id,l2id)?.name, findL3(l1id,l2id,l3id)?.name].filter(Boolean).join(" › ") || "未分類";
-}
-function exportCSV(db) {
-  const hdr = "JAN,商品名,大分類,中分類,小分類,単価,仕入れ値,粗利率,在庫数,発注点,仕入れ先,登録日";
+
+function exportCSV(db, cats) {
+  const hdr = "JAN,商品名,大分類,中分類,小分類,メーカー,仕入れ先,単価,仕入れ値,粗利率,在庫数,発注点,登録日";
   const rows = db.map(i => [
     i.jan, `"${i.name}"`,
-    findL1(i.catL1)?.name||"", findL2(i.catL1,i.catL2)?.name||"", findL3(i.catL1,i.catL2,i.catL3)?.name||"",
-    i.price, i.cost||0, calcM(i.price,i.cost)||"", i.qty, i.reorderPoint||0, `"${i.supplier||""}"`, i.addedAt
+    findL1(cats,i.catL1)?.name||"", findL2(cats,i.catL1,i.catL2)?.name||"", findL3(cats,i.catL1,i.catL2,i.catL3)?.name||"",
+    `"${i.maker||""}"`, `"${i.supplier||""}"`,
+    i.price, i.cost||0, calcM(i.price,i.cost)||"", i.qty, i.reorderPoint||0, i.addedAt
   ].join(","));
   const blob = new Blob(["\uFEFF"+[hdr,...rows].join("\n")],{type:"text/csv;charset=utf-8;"});
   Object.assign(document.createElement("a"),{href:URL.createObjectURL(blob),download:"stock.csv"}).click();
+}
+
+function exportInventoryCSV(db, cats) {
+  const hdr = "JAN,商品名,大分類,中分類,小分類,メーカー,仕入れ先,単価,仕入れ値,帳簿在庫数,実在庫数,差異,備考";
+  const rows = db.map(i => [
+    i.jan, `"${i.name}"`,
+    findL1(cats,i.catL1)?.name||"", findL2(cats,i.catL1,i.catL2)?.name||"", findL3(cats,i.catL1,i.catL2,i.catL3)?.name||"",
+    `"${i.maker||""}"`, `"${i.supplier||""}"`,
+    i.price, i.cost||0, i.qty, "", "", ""
+  ].join(","));
+  const blob = new Blob(["\uFEFF"+[hdr,...rows].join("\n")],{type:"text/csv;charset=utf-8;"});
+  Object.assign(document.createElement("a"),{href:URL.createObjectURL(blob),download:"inventory_count.csv"}).click();
 }
 
 // ── カメラスキャナー ──────────────────────────────────
@@ -146,13 +164,12 @@ function CameraScanner({ onDetected, onClose }) {
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{fontSize:16,color:"#E6EDF3",marginBottom:16,fontWeight:700}}>📷 バーコードをスキャン</div>
-      {err
-        ? <div style={{color:"#F85149",fontSize:13}}>{err}</div>
-        : <div style={{position:"relative"}}>
-            <video ref={videoRef} style={{width:"min(360px,90vw)",borderRadius:8,display:"block"}} playsInline muted />
-            <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:"70%",height:60,border:"2px solid #3FB950",borderRadius:4,boxShadow:"0 0 0 1000px rgba(0,0,0,.4)"}} />
-          </div>
-      }
+      {err ? <div style={{color:"#F85149",fontSize:13}}>{err}</div> : (
+        <div style={{position:"relative"}}>
+          <video ref={videoRef} style={{width:"min(360px,90vw)",borderRadius:8,display:"block"}} playsInline muted />
+          <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:"70%",height:60,border:"2px solid #3FB950",borderRadius:4,boxShadow:"0 0 0 1000px rgba(0,0,0,.4)"}} />
+        </div>
+      )}
       {scanning && !err && <div style={{color:"#3FB950",fontSize:12,marginTop:10}}>バーコードをフレームに合わせてください</div>}
       <button style={{marginTop:20,background:"transparent",color:"#F85149",border:"1px solid rgba(248,81,73,.4)",borderRadius:6,padding:"10px 28px",cursor:"pointer",fontSize:14,fontWeight:700}} onClick={onClose}>キャンセル</button>
     </div>
@@ -160,16 +177,16 @@ function CameraScanner({ onDetected, onClose }) {
 }
 
 // ── カテゴリー選択（3段階） ───────────────────────────
-function CategorySelect({ l1, l2, l3, onChange, inpS }) {
-  const l2opts = l1 ? (findL1(l1)?.children||[]) : [];
-  const l3opts = l2 ? (findL2(l1,l2)?.children||[]) : [];
+function CategorySelect({ cats, l1, l2, l3, onChange, inpS }) {
+  const l2opts = l1 ? (findL1(cats,l1)?.children||[]) : [];
+  const l3opts = l2 ? (findL2(cats,l1,l2)?.children||[]) : [];
   return (
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
       <div>
         <div style={{fontSize:11,color:"#8B949E",marginBottom:3}}>大分類</div>
         <select style={inpS} value={l1||""} onChange={e => onChange(e.target.value,"","")}>
           <option value="">選択してください</option>
-          {CATS.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+          {cats.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
         </select>
       </div>
       <div>
@@ -191,11 +208,11 @@ function CategorySelect({ l1, l2, l3, onChange, inpS }) {
 }
 
 // ── 商品カード（iPad表示） ────────────────────────────
-function ItemCard({ item, onEdit, onDelete }) {
+function ItemCard({ item, cats, onEdit, onDelete }) {
   const m = calcM(item.price, item.cost);
   const isAl = item.qty <= (item.reorderPoint||0);
-  const l1 = findL1(item.catL1);
-  const l3 = findL3(item.catL1, item.catL2, item.catL3);
+  const l1 = findL1(cats, item.catL1);
+  const l3 = findL3(cats, item.catL1, item.catL2, item.catL3);
   const badge = item.qty===0 ? {text:"在庫なし",col:"#F85149",bg:"rgba(248,81,73,.12)"}
     : isAl ? {text:"⚠発注要",col:"#F85149",bg:"rgba(248,81,73,.12)"}
     : item.qty<=5 ? {text:"残りわずか",col:"#D29922",bg:"rgba(210,153,34,.12)"}
@@ -210,12 +227,12 @@ function ItemCard({ item, onEdit, onDelete }) {
         <span style={{flexShrink:0,background:badge.bg,color:badge.col,padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:700}}>{badge.text}</span>
       </div>
       {(l1||l3) && (
-        <div style={{fontSize:11,color:"#8B949E",marginBottom:10}}>
+        <div style={{fontSize:11,color:"#8B949E",marginBottom:8}}>
           {l1 && <span>{l1.emoji} {l1.name}</span>}
           {l3 && <span style={{color:"#484F58"}}> › {l3.name}</span>}
         </div>
       )}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
         <div style={{background:"#1C2128",borderRadius:6,padding:"8px 10px"}}>
           <div style={{fontSize:9,color:"#484F58",marginBottom:3,letterSpacing:1}}>単価</div>
           <div style={{fontFamily:"monospace",fontWeight:700,color:"#58A6FF",fontSize:14}}>{fmtY(item.price)}</div>
@@ -229,11 +246,12 @@ function ItemCard({ item, onEdit, onDelete }) {
           <div style={{fontFamily:"monospace",fontWeight:700,color:mCol(m),fontSize:14}}>{m!==null?m+"%":"—"}</div>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:11,color:"#8B949E",marginBottom:item.supplier?8:0}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:11,color:"#8B949E",marginBottom:6}}>
         <div>仕入れ値: <span style={{fontFamily:"monospace",color:"#E6EDF3"}}>{item.cost?fmtY(item.cost):"—"}</span></div>
         <div>発注点: <span style={{fontFamily:"monospace",color:"#E6EDF3"}}>{item.reorderPoint||0}</span></div>
+        {item.maker && <div>メーカー: <span style={{color:"#E6EDF3"}}>{item.maker}</span></div>}
+        {item.supplier && <div>仕入れ先: <span style={{color:"#E6EDF3"}}>{item.supplier}</span></div>}
       </div>
-      {item.supplier && <div style={{fontSize:11,color:"#8B949E",marginBottom:8}}>仕入れ先: <span style={{color:"#E6EDF3"}}>{item.supplier}</span></div>}
       <div style={{display:"flex",gap:8,marginTop:10}}>
         <button style={{flex:1,background:"rgba(88,166,255,.1)",color:"#58A6FF",border:"1px solid rgba(88,166,255,.3)",borderRadius:6,cursor:"pointer",fontSize:13,padding:"8px 0",fontWeight:600}} onClick={() => onEdit(item)}>✏ 編集</button>
         <button style={{background:"transparent",color:"#F85149",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,cursor:"pointer",fontSize:13,padding:"8px 14px"}} onClick={() => onDelete(item.id)}>削除</button>
@@ -245,6 +263,7 @@ function ItemCard({ item, onEdit, onDelete }) {
 // ── メインアプリ ──────────────────────────────────────
 export default function App() {
   const [tab, setTab]               = useState("inventory");
+  const [cats, setCats]             = useState(CATS_INITIAL);
   const [db, setDb]                 = useState(INIT_DB);
   const [jan, setJan]               = useState("");
   const [loading, setLoading]       = useState(false);
@@ -255,6 +274,7 @@ export default function App() {
   const [arL1, setArL1]             = useState("");
   const [arL2, setArL2]             = useState("");
   const [arL3, setArL3]             = useState("");
+  const [arMaker, setArMaker]       = useState("");
   const [arSupplier, setArSupplier] = useState("");
   const [toasts, setToasts]         = useState([]);
   const [fCat, setFCat]             = useState("all");
@@ -262,6 +282,9 @@ export default function App() {
   const [editItem, setEditItem]     = useState(null);
   const [showCamera, setShowCamera] = useState(false);
   const [isMobile, setIsMobile]     = useState(window.innerWidth < 1024);
+  const [addCatModal, setAddCatModal] = useState(null);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatEmoji, setNewCatEmoji] = useState("📦");
   const ref = useRef(null);
 
   useEffect(() => {
@@ -280,6 +303,49 @@ export default function App() {
     setTimeout(() => setToasts(t => t.filter(x => x.id!==id)), 3400);
   }, []);
 
+  // ── カテゴリーCRUD ──────────────────────────────────
+  function openAddCat(level, l1id, l2id) {
+    setAddCatModal({level, l1id:l1id||null, l2id:l2id||null});
+    setNewCatName(""); setNewCatEmoji("📦");
+  }
+
+  function confirmAddCat() {
+    if (!newCatName.trim()) { addToast("名前を入力してください","err"); return; }
+    const id = "c" + Date.now();
+    const { level, l1id, l2id } = addCatModal;
+    if (level===1) {
+      setCats(c => [...c, {id, name:newCatName, emoji:newCatEmoji, children:[]}]);
+    } else if (level===2) {
+      setCats(c => c.map(l1 => l1.id!==l1id ? l1 : {...l1, children:[...l1.children, {id, name:newCatName, children:[]}]}));
+    } else {
+      setCats(c => c.map(l1 => l1.id!==l1id ? l1 : {...l1, children:l1.children.map(l2 => l2.id!==l2id ? l2 : {...l2, children:[...l2.children, {id, name:newCatName}]})}));
+    }
+    setAddCatModal(null);
+    addToast("カテゴリーを追加しました","ok");
+  }
+
+  function delL1(l1id) {
+    if (!window.confirm("大分類を削除しますか？関連商品の分類がリセットされます。")) return;
+    setCats(c => c.filter(l1 => l1.id!==l1id));
+    setDb(d => d.map(i => i.catL1===l1id ? {...i,catL1:"",catL2:"",catL3:""} : i));
+    addToast("大分類を削除しました","info");
+  }
+
+  function delL2(l1id, l2id) {
+    if (!window.confirm("中分類を削除しますか？")) return;
+    setCats(c => c.map(l1 => l1.id!==l1id ? l1 : {...l1, children:l1.children.filter(l2=>l2.id!==l2id)}));
+    setDb(d => d.map(i => i.catL2===l2id ? {...i,catL2:"",catL3:""} : i));
+    addToast("中分類を削除しました","info");
+  }
+
+  function delL3(l1id, l2id, l3id) {
+    if (!window.confirm("小分類を削除しますか？")) return;
+    setCats(c => c.map(l1 => l1.id!==l1id ? l1 : {...l1, children:l1.children.map(l2 => l2.id!==l2id ? l2 : {...l2, children:l2.children.filter(l3=>l3.id!==l3id)})}));
+    setDb(d => d.map(i => i.catL3===l3id ? {...i,catL3:""} : i));
+    addToast("小分類を削除しました","info");
+  }
+
+  // ── 商品検索 ─────────────────────────────────────────
   const processJan = useCallback(async (code) => {
     code = code.trim().replace(/\D/g,"");
     if (code.length < 8) { addToast("8〜13桁のJANコードを入力してください","err"); return; }
@@ -289,7 +355,7 @@ export default function App() {
       const existing = db.find(i => i.jan===code) || null;
       setModal({product, isNew:!existing, existing});
       setArQty(1); setArCost(""); setArL1(""); setArL2(""); setArL3("");
-      setArSupplier(existing?existing.supplier||"":"");
+      setArMaker(existing?existing.maker||"":""); setArSupplier(existing?existing.supplier||"":"");
       setJan(""); return;
     }
     setLoading(true);
@@ -301,16 +367,16 @@ export default function App() {
         ? {jan:code, name:data.name, price:data.price||0, cost:0, brand:data.brand||""}
         : {jan:code, name:"商品 (JAN:"+code+")", price:0, cost:0, brand:""};
       if (res.ok && data.name) addToast("商品情報を取得しました","ok");
-      else addToast("商品が見つかりませんでした。手入力してください","info");
+      else addToast("商品が見つかりません。手入力してください","info");
       const existing = db.find(i => i.jan===code) || null;
       setModal({product, isNew:!existing, existing});
       setArQty(1); setArCost(String(product.cost||"")); setArL1(""); setArL2(""); setArL3("");
-      setArSupplier(existing?existing.supplier||"":"");
+      setArMaker(existing?existing.maker||"":""); setArSupplier(existing?existing.supplier||"":"");
       setJan("");
     } catch(e) {
       const existing = db.find(i => i.jan===code) || null;
       setModal({product:{jan:code,name:"商品 (JAN:"+code+")",price:0,cost:0,brand:""}, isNew:!existing, existing});
-      setArQty(1); setArCost(""); setArL1(""); setArL2(""); setArL3(""); setArSupplier(""); setJan("");
+      setArQty(1); setArCost(""); setArL1(""); setArL2(""); setArL3(""); setArMaker(""); setArSupplier(""); setJan("");
       addToast("通信エラー。手入力してください","err");
     }
     setLoading(false);
@@ -327,14 +393,16 @@ export default function App() {
     const cost = parseInt(arCost)||0;
     if (modal.isNew) {
       const item = {id:Date.now(), jan:modal.product.jan, name:modal.product.name, price:modal.product.price,
-        cost, qty:arQty, reorderPoint:5, catL1:arL1, catL2:arL2, catL3:arL3, supplier:arSupplier,
-        addedAt:new Date().toISOString().slice(0,10)};
+        cost, qty:arQty, reorderPoint:5, catL1:arL1, catL2:arL2, catL3:arL3,
+        maker:arMaker, supplier:arSupplier, addedAt:new Date().toISOString().slice(0,10)};
       setDb(d => [item,...d]);
       addToast("新規登録 ("+arQty+"個)","ok");
     } else {
       const prev = modal.existing.qty;
       setDb(d => d.map(i => i.jan===modal.product.jan
-        ? {...i, qty:i.qty+arQty, cost:cost||i.cost, catL1:arL1||i.catL1, catL2:arL2||i.catL2, catL3:arL3||i.catL3, supplier:arSupplier||i.supplier}
+        ? {...i, qty:i.qty+arQty, cost:cost||i.cost,
+           catL1:arL1||i.catL1, catL2:arL2||i.catL2, catL3:arL3||i.catL3,
+           maker:arMaker||i.maker, supplier:arSupplier||i.supplier}
         : i));
       addToast("在庫+"+arQty+"個 (計"+(modal.existing.qty+arQty)+"個)","ok");
     }
@@ -366,12 +434,14 @@ export default function App() {
   }).filter(i => {
     if (!fTxt) return true;
     const t = fTxt.toLowerCase();
-    return i.name.toLowerCase().includes(t) || i.jan.includes(t);
+    return i.name.toLowerCase().includes(t) || i.jan.includes(t) || (i.maker||"").toLowerCase().includes(t);
   }), [db,fCat,fTxt]);
 
   const inpS = {background:"#1C2128",border:"1px solid #30363D",borderRadius:6,color:"#E6EDF3",fontFamily:"system-ui,sans-serif",fontSize:13,padding:"8px 10px",outline:"none",width:"100%"};
   const btnP = {background:"#1F6FEB",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:13,padding:"8px 14px"};
   const btnG = {background:"transparent",color:"#8B949E",border:"1px solid #30363D",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"8px 12px"};
+  const btnS = {background:"rgba(88,166,255,.1)",color:"#58A6FF",border:"1px solid rgba(88,166,255,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:11,padding:"3px 8px"};
+  const btnD = {background:"transparent",color:"#F85149",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,cursor:"pointer",fontSize:11,padding:"3px 8px"};
   const thS  = {padding:"9px 12px",textAlign:"left",fontSize:10,fontWeight:700,textTransform:"uppercase",color:"#484F58",borderBottom:"1px solid #30363D",whiteSpace:"nowrap"};
   const tdS  = {padding:"10px 12px",fontSize:12,borderBottom:"1px solid #30363D",verticalAlign:"middle"};
   const eInp = {background:"#1C2128",border:"1px solid #58A6FF",borderRadius:4,color:"#E6EDF3",fontFamily:"monospace",fontSize:12,padding:"3px 6px",outline:"none"};
@@ -413,8 +483,6 @@ export default function App() {
       {/* 在庫管理タブ */}
       {tab==="inventory" && (
         <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0}}>
-
-          {/* スキャンパネル */}
           <div style={{background:"#161B22",borderBottom:"1px solid #30363D",padding:12}}>
             <div style={{display:"flex",gap:8,maxWidth:600}}>
               <button style={{...btnP,background:"#238636",whiteSpace:"nowrap"}} onClick={() => setShowCamera(true)}>📷 スキャン</button>
@@ -432,14 +500,13 @@ export default function App() {
             </div>
           </div>
 
-          {/* アラート */}
           {alerts.length>0 && (
             <div style={{margin:"10px 16px 0",background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:8,padding:"8px 12px",color:"#F85149",fontSize:13}}>
               ⚠️ <strong>{alerts.length}件</strong>が発注点以下です
             </div>
           )}
 
-          {/* カテゴリーフィルター */}
+          {/* フィルター */}
           <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"nowrap",overflowX:"auto",padding:"10px 16px 0",paddingBottom:4}}>
             {[["all","すべて",db.length],["","未分類",db.filter(i=>!i.catL1).length]].map(x => (
               <div key={x[0]} style={{flexShrink:0,display:"flex",alignItems:"center",gap:4,padding:"5px 12px",borderRadius:20,border:fCat===x[0]?"1px solid #1F6FEB":"1px solid #30363D",background:fCat===x[0]?"#1F6FEB":"#21262D",fontSize:12,fontWeight:500,color:fCat===x[0]?"#fff":"#8B949E",cursor:"pointer"}} onClick={() => setFCat(x[0])}>
@@ -451,28 +518,27 @@ export default function App() {
                 ⚠ 要発注<span style={{fontSize:9,fontFamily:"monospace",opacity:.8,marginLeft:2}}>{alerts.length}</span>
               </div>
             )}
-            {CATS.map(cat => (
+            {cats.map(cat => (
               <div key={cat.id} style={{flexShrink:0,display:"flex",alignItems:"center",gap:4,padding:"5px 12px",borderRadius:20,border:fCat===cat.id?"1px solid #1F6FEB":"1px solid #30363D",background:fCat===cat.id?"#1F6FEB":"#21262D",fontSize:12,fontWeight:500,color:fCat===cat.id?"#fff":"#8B949E",cursor:"pointer"}} onClick={() => setFCat(cat.id)}>
                 {cat.emoji} {cat.name}<span style={{fontSize:9,fontFamily:"monospace",opacity:.7,marginLeft:2}}>{db.filter(i=>i.catL1===cat.id).length}</span>
               </div>
             ))}
           </div>
 
-          {/* 検索・CSV */}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px 6px"}}>
             <div style={{fontSize:14,fontWeight:700}}>商品マスタ一覧 <span style={{fontSize:12,color:"#484F58",fontWeight:400}}>({rows.length}件)</span></div>
-            <div style={{display:"flex",gap:8}}>
-              <input style={{background:"#21262D",border:"1px solid #30363D",borderRadius:6,color:"#E6EDF3",fontSize:12,padding:"6px 10px",outline:"none",width:130}} placeholder="商品名/JAN…" value={fTxt} onChange={e => setFTxt(e.target.value)}/>
-              <button style={{background:"rgba(63,185,80,.12)",color:"#3FB950",border:"1px solid rgba(63,185,80,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"6px 12px"}} onClick={() => {exportCSV(db);addToast("CSV出力しました","ok");}}>⬇ CSV</button>
+            <div style={{display:"flex",gap:6}}>
+              <input style={{background:"#21262D",border:"1px solid #30363D",borderRadius:6,color:"#E6EDF3",fontSize:12,padding:"6px 10px",outline:"none",width:120}} placeholder="商品名/JAN/メーカー…" value={fTxt} onChange={e => setFTxt(e.target.value)}/>
+              <button style={{background:"rgba(63,185,80,.12)",color:"#3FB950",border:"1px solid rgba(63,185,80,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"6px 10px"}} onClick={() => {exportCSV(db,cats);addToast("CSV出力しました","ok");}}>⬇ CSV</button>
+              <button style={{background:"rgba(210,153,34,.12)",color:"#D29922",border:"1px solid rgba(210,153,34,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"6px 10px"}} onClick={() => {exportInventoryCSV(db,cats);addToast("棚卸しCSVを出力しました","ok");}}>📋 棚卸し</button>
             </div>
           </div>
 
-          {/* カード or テーブル */}
           {isMobile ? (
             <div style={{padding:"0 16px 20px",flex:1,overflowY:"auto"}}>
               {rows.length===0
                 ? <div style={{padding:"40px 20px",textAlign:"center",color:"#484F58"}}><div style={{fontSize:40,marginBottom:8}}>📋</div>商品がありません</div>
-                : rows.map(item => <ItemCard key={item.id} item={item} onEdit={setEditModal} onDelete={id => {setDb(d=>d.filter(i=>i.id!==id));addToast("削除しました","info");}} />)
+                : rows.map(item => <ItemCard key={item.id} item={item} cats={cats} onEdit={setEditModal} onDelete={id => {setDb(d=>d.filter(i=>i.id!==id));addToast("削除しました","info");}} />)
               }
             </div>
           ) : (
@@ -481,33 +547,34 @@ export default function App() {
                 ? <div style={{padding:"40px 20px",textAlign:"center",color:"#484F58"}}><div style={{fontSize:40,marginBottom:8}}>📋</div>商品がありません</div>
                 : (
                   <div style={{background:"#21262D",borderRadius:8,border:"1px solid #30363D",overflow:"hidden",marginTop:4}}>
-                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:1000}}>
                       <thead>
                         <tr style={{background:"#1C2128"}}>
-                          {["JAN","商品名","大分類","小分類","単価","仕入れ値","粗利率","在庫","発注点","仕入れ先","状態","登録日",""].map(h => <th key={h} style={thS}>{h}</th>)}
+                          {["JAN","商品名","大分類","小分類","メーカー","仕入れ先","単価","仕入れ値","粗利率","在庫","発注点","状態","登録日",""].map(h => <th key={h} style={thS}>{h}</th>)}
                         </tr>
                       </thead>
                       <tbody>
                         {rows.map(item => {
                           const m = calcM(item.price, item.cost);
                           const isAl = item.qty<=(item.reorderPoint||0);
-                          const l1 = findL1(item.catL1);
-                          const l3 = findL3(item.catL1,item.catL2,item.catL3);
+                          const l1 = findL1(cats, item.catL1);
+                          const l3 = findL3(cats, item.catL1, item.catL2, item.catL3);
                           return (
                             <tr key={item.id}>
                               <td style={{...tdS,fontFamily:"monospace",fontSize:10,color:"#484F58"}}>{item.jan}</td>
                               <td style={{...tdS,maxWidth:150}}>{EditCell(item,"name",item.name,130,false)}</td>
                               <td style={tdS}>{l1?<span style={{fontSize:11,fontWeight:600}}>{l1.emoji} {l1.name}</span>:<span style={{color:"#484F58",fontSize:11}}>—</span>}</td>
                               <td style={{...tdS,fontSize:11,color:"#8B949E",maxWidth:100}}>{l3?l3.name:"—"}</td>
+                              <td style={{...tdS,maxWidth:100}}>{EditCell(item,"maker",item.maker||"—",90,false)}</td>
+                              <td style={{...tdS,maxWidth:100}}>{EditCell(item,"supplier",item.supplier||"—",90,false)}</td>
                               <td style={{...tdS,fontFamily:"monospace",color:"#58A6FF",fontWeight:600}}>{EditCell(item,"price",fmtY(item.price),80,true)}</td>
                               <td style={{...tdS,fontFamily:"monospace",color:"#8B949E"}}>{EditCell(item,"cost",item.cost?fmtY(item.cost):"—",80,true)}</td>
                               <td style={{...tdS,fontFamily:"monospace",fontWeight:600,color:mCol(m)}}>{m!==null?m+"%":"—"}</td>
                               <td style={{...tdS,fontFamily:"monospace",fontWeight:700}}>{EditCell(item,"qty",item.qty,60,true)}</td>
                               <td style={{...tdS,fontFamily:"monospace",color:"#484F58"}}>{EditCell(item,"reorderPoint",item.reorderPoint||0,60,true)}</td>
-                              <td style={{...tdS,maxWidth:100}}>{EditCell(item,"supplier",item.supplier||"—",90,false)}</td>
                               <td style={tdS}>{item.qty===0?<span style={{background:"rgba(248,81,73,.12)",color:"#F85149",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>在庫なし</span>:isAl?<span style={{background:"rgba(248,81,73,.12)",color:"#F85149",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>⚠発注要</span>:item.qty<=5?<span style={{background:"rgba(210,153,34,.12)",color:"#D29922",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>残りわずか</span>:<span style={{background:"rgba(63,185,80,.12)",color:"#3FB950",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>在庫あり</span>}</td>
                               <td style={{...tdS,fontSize:10,color:"#484F58"}}>{item.addedAt}</td>
-                              <td style={tdS}><button style={{background:"transparent",color:"#F85149",border:"1px solid rgba(248,81,73,.3)",borderRadius:4,cursor:"pointer",fontSize:11,padding:"3px 8px"}} onClick={() => {setDb(d=>d.filter(i=>i.id!==item.id));addToast("削除しました","info");}}>削除</button></td>
+                              <td style={tdS}><button style={btnD} onClick={() => {setDb(d=>d.filter(i=>i.id!==item.id));addToast("削除しました","info");}}>削除</button></td>
                             </tr>
                           );
                         })}
@@ -516,7 +583,7 @@ export default function App() {
                   </div>
                 )
               }
-              {!isMobile && rows.length>0 && <div style={{marginTop:6,fontSize:11,color:"#484F58"}}>💡 商品名・単価・仕入れ値・在庫数・発注点・仕入れ先はダブルクリックで編集できます</div>}
+              {!isMobile && rows.length>0 && <div style={{marginTop:6,fontSize:11,color:"#484F58"}}>💡 商品名・単価・仕入れ値・メーカー・仕入れ先・在庫数・発注点はダブルクリックで編集できます</div>}
             </div>
           )}
         </div>
@@ -535,7 +602,7 @@ export default function App() {
           </div>
           <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16}}>
             <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>大分類別 在庫評価額</div>
-            {CATS.map(cat => {
+            {cats.map(cat => {
               const val = db.filter(i=>i.catL1===cat.id).reduce((s,i)=>s+i.price*i.qty,0);
               if (!val) return null;
               return (
@@ -585,25 +652,42 @@ export default function App() {
       {/* 分類タブ */}
       {tab==="categories" && (
         <div style={{padding:16}}>
-          <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>カテゴリー構成</div>
-          {CATS.map(l1 => (
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:16,fontWeight:700}}>カテゴリー管理</div>
+            <button style={btnP} onClick={() => openAddCat(1)}>+ 大分類を追加</button>
+          </div>
+          {cats.map(l1 => (
             <div key={l1.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:10}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                <span style={{fontSize:22}}>{l1.emoji}</span>
-                <div>
-                  <div style={{fontWeight:700,fontSize:15}}>{l1.name}</div>
-                  <div style={{fontSize:11,color:"#484F58"}}>{db.filter(i=>i.catL1===l1.id).length} 商品</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:22}}>{l1.emoji}</span>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:15}}>{l1.name}</div>
+                    <div style={{fontSize:11,color:"#484F58"}}>{db.filter(i=>i.catL1===l1.id).length} 商品</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button style={btnS} onClick={() => openAddCat(2,l1.id)}>+ 中分類</button>
+                  <button style={btnD} onClick={() => delL1(l1.id)}>削除</button>
                 </div>
               </div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {l1.children.map(l2 => (
-                  <div key={l2.id} style={{background:"#1C2128",borderRadius:6,padding:"8px 10px",minWidth:120}}>
-                    <div style={{fontSize:12,fontWeight:600,marginBottom:6,color:"#E6EDF3"}}>{l2.name}</div>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                  <div key={l2.id} style={{background:"#1C2128",borderRadius:6,padding:"10px 12px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <div style={{fontSize:13,fontWeight:600}}>{l2.name}</div>
+                      <div style={{display:"flex",gap:6}}>
+                        <button style={btnS} onClick={() => openAddCat(3,l1.id,l2.id)}>+ 小分類</button>
+                        <button style={btnD} onClick={() => delL2(l1.id,l2.id)}>削除</button>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                       {l2.children.map(l3 => (
-                        <span key={l3.id} style={{background:"#0D1117",border:"1px solid #30363D",borderRadius:4,padding:"2px 6px",fontSize:10,color:"#8B949E"}}>
-                          {l3.name}<span style={{marginLeft:3,color:"#484F58"}}>({db.filter(i=>i.catL3===l3.id).length})</span>
-                        </span>
+                        <div key={l3.id} style={{display:"flex",alignItems:"center",gap:4,background:"#0D1117",border:"1px solid #30363D",borderRadius:4,padding:"3px 8px"}}>
+                          <span style={{fontSize:11,color:"#8B949E"}}>{l3.name}</span>
+                          <span style={{fontSize:10,color:"#484F58"}}>({db.filter(i=>i.catL3===l3.id).length})</span>
+                          <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#F85149",fontSize:12,padding:"0 2px",lineHeight:1}} onClick={() => delL3(l1.id,l2.id,l3.id)}>×</button>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -623,7 +707,7 @@ export default function App() {
           <div style={{background:"#161B22",border:"1px solid #444C56",borderRadius:10,width:"100%",maxWidth:480,boxShadow:"0 20px 60px rgba(0,0,0,.5)",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"#161B22"}}>
               <div style={{fontSize:14,fontWeight:700}}>{modal.isNew?"✨ 新規商品を登録":"📦 在庫を追加"}</div>
-              <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={() => setModal(null)}>×</button>
+              <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setModal(null)}>×</button>
             </div>
             <div style={{padding:"14px 16px"}}>
               <div style={{background:modal.isNew?"rgba(63,185,80,.12)":"rgba(88,166,255,.1)",borderRadius:7,padding:"8px 12px",fontSize:12,color:modal.isNew?"#3FB950":"#58A6FF",fontWeight:600,marginBottom:12}}>
@@ -654,12 +738,18 @@ export default function App() {
                       <div style={{fontSize:10,color:"#484F58",marginTop:2}}>粗利率: <span style={{fontWeight:700,color:mCol(calcM(modal.product.price,Number(arCost)))}}>{calcM(modal.product.price,Number(arCost))}%</span></div>
                     )}
                   </div>
-                  <div style={{marginBottom:12}}>
-                    <CategorySelect l1={arL1} l2={arL2} l3={arL3} onChange={(l1,l2,l3)=>{setArL1(l1);setArL2(l2);setArL3(l3);}} inpS={inpS}/>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                    <div>
+                      <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div>
+                      <input style={inpS} type="text" placeholder="例：ユニ・チャーム" value={arMaker} onChange={e=>setArMaker(e.target.value)}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div>
+                      <input style={inpS} type="text" placeholder="例：〇〇商事" value={arSupplier} onChange={e=>setArSupplier(e.target.value)}/>
+                    </div>
                   </div>
                   <div style={{marginBottom:12}}>
-                    <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div>
-                    <input style={inpS} type="text" placeholder="例：ユニ・チャーム" value={arSupplier} onChange={e=>setArSupplier(e.target.value)}/>
+                    <CategorySelect cats={cats} l1={arL1} l2={arL2} l3={arL3} onChange={(l1,l2,l3)=>{setArL1(l1);setArL2(l2);setArL3(l3);}} inpS={inpS}/>
                   </div>
                 </>
               )}
@@ -689,43 +779,58 @@ export default function App() {
               <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setEditModal(null)}>×</button>
             </div>
             <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
-              <div>
-                <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div>
-                <input style={inpS} type="text" value={editModal.name} onChange={e=>setEditModal(m=>({...m,name:e.target.value}))}/>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div><input style={inpS} type="text" value={editModal.name} onChange={e=>setEditModal(m=>({...m,name:e.target.value}))}/></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>単価（円）</div><input style={inpS} type="number" min="0" value={editModal.price} onChange={e=>setEditModal(m=>({...m,price:Number(e.target.value)||0}))}/></div>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ値（円）</div><input style={inpS} type="number" min="0" value={editModal.cost||""} onChange={e=>setEditModal(m=>({...m,cost:Number(e.target.value)||0}))}/></div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <div>
-                  <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>単価（円）</div>
-                  <input style={inpS} type="number" min="0" value={editModal.price} onChange={e=>setEditModal(m=>({...m,price:Number(e.target.value)||0}))}/>
-                </div>
-                <div>
-                  <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ値（円）</div>
-                  <input style={inpS} type="number" min="0" value={editModal.cost||""} onChange={e=>setEditModal(m=>({...m,cost:Number(e.target.value)||0}))}/>
-                </div>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫数</div><input style={inpS} type="number" min="0" value={editModal.qty} onChange={e=>setEditModal(m=>({...m,qty:Number(e.target.value)||0}))}/></div>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>発注点</div><input style={inpS} type="number" min="0" value={editModal.reorderPoint||0} onChange={e=>setEditModal(m=>({...m,reorderPoint:Number(e.target.value)||0}))}/></div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <div>
-                  <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫数</div>
-                  <input style={inpS} type="number" min="0" value={editModal.qty} onChange={e=>setEditModal(m=>({...m,qty:Number(e.target.value)||0}))}/>
-                </div>
-                <div>
-                  <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>発注点</div>
-                  <input style={inpS} type="number" min="0" value={editModal.reorderPoint||0} onChange={e=>setEditModal(m=>({...m,reorderPoint:Number(e.target.value)||0}))}/>
-                </div>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div><input style={inpS} type="text" placeholder="例：ユニ・チャーム" value={editModal.maker||""} onChange={e=>setEditModal(m=>({...m,maker:e.target.value}))}/></div>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div><input style={inpS} type="text" placeholder="例：〇〇商事" value={editModal.supplier||""} onChange={e=>setEditModal(m=>({...m,supplier:e.target.value}))}/></div>
               </div>
-              <CategorySelect
-                l1={editModal.catL1||""} l2={editModal.catL2||""} l3={editModal.catL3||""}
-                onChange={(l1,l2,l3)=>setEditModal(m=>({...m,catL1:l1,catL2:l2,catL3:l3}))}
-                inpS={inpS}
-              />
-              <div>
-                <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div>
-                <input style={inpS} type="text" placeholder="例：ユニ・チャーム" value={editModal.supplier||""} onChange={e=>setEditModal(m=>({...m,supplier:e.target.value}))}/>
-              </div>
+              <CategorySelect cats={cats} l1={editModal.catL1||""} l2={editModal.catL2||""} l3={editModal.catL3||""} onChange={(l1,l2,l3)=>setEditModal(m=>({...m,catL1:l1,catL2:l2,catL3:l3}))} inpS={inpS}/>
             </div>
             <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}>
               <button style={btnG} onClick={()=>setEditModal(null)}>キャンセル</button>
               <button style={btnP} onClick={saveEditModal}>💾 保存する</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* カテゴリー追加モーダル */}
+      {addCatModal && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>{if(e.target===e.currentTarget)setAddCatModal(null);}}>
+          <div style={{background:"#161B22",border:"1px solid #444C56",borderRadius:10,width:"100%",maxWidth:380,boxShadow:"0 20px 60px rgba(0,0,0,.5)"}}>
+            <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{fontSize:14,fontWeight:700}}>
+                {addCatModal.level===1?"大分類を追加":addCatModal.level===2?"中分類を追加":"小分類を追加"}
+              </div>
+              <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setAddCatModal(null)}>×</button>
+            </div>
+            <div style={{padding:"14px 16px"}}>
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>名前</div>
+                <input style={inpS} autoFocus type="text" placeholder={addCatModal.level===1?"例：介護用品":addCatModal.level===2?"例：排泄ケア":"例：紙おむつ（パンツ型）"} value={newCatName} onChange={e=>setNewCatName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")confirmAddCat();}}/>
+              </div>
+              {addCatModal.level===1 && (
+                <div>
+                  <div style={{fontSize:11,color:"#8B949E",marginBottom:6}}>アイコン（大分類のみ）</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                    {EMOJIS.map(em => (
+                      <span key={em} style={{fontSize:22,cursor:"pointer",padding:4,borderRadius:6,border:newCatEmoji===em?"2px solid #58A6FF":"2px solid transparent",background:newCatEmoji===em?"#1C2128":"transparent"}} onClick={()=>setNewCatEmoji(em)}>{em}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}>
+              <button style={btnG} onClick={()=>setAddCatModal(null)}>キャンセル</button>
+              <button style={btnP} onClick={confirmAddCat}>追加する</button>
             </div>
           </div>
         </div>
