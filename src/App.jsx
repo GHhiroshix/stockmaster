@@ -140,7 +140,7 @@ export default function App(){
     setModal(null);if(ref.current)ref.current.focus();
   }
 
-  function confirmAddIncoming(){if(!incomingModal)return;if(!incomingModal.name.trim()){addToast("商品名を入力してください","err");return;}const rec={...incomingModal,id:Date.now(),totalCost:(incomingModal.qty||0)*(incomingModal.cost||0)};setIncoming(h=>[rec,...h]);setIncomingModal(null);addToast("入庫履歴を追加しました","ok");}
+  function confirmAddIncoming(){if(!incomingModal)return;if(!incomingModal.name.trim()){addToast("商品名を入力してください","err");return;}const rec={...incomingModal,id:Date.now(),totalCost:(incomingModal.qty||0)*(incomingModal.cost||0)};setIncoming(h=>[rec,...h]);if(incomingModal.jan){const ex=db.find(i=>i.jan===incomingModal.jan);if(ex)setDb(d=>d.map(i=>i.jan===incomingModal.jan?{...i,qty:i.qty+(incomingModal.qty||0)}:i));}setIncomingModal(null);addToast("入庫履歴を追加（在庫+"+incomingModal.qty+"個）","ok");}
 
   function confirmAddOutgoing(){
     if(!outgoingModal)return;if(!outgoingModal.name.trim()){addToast("商品名を入力してください","err");return;}if(!outgoingModal.qty||outgoingModal.qty<1){addToast("出庫数量を入力してください","err");return;}
@@ -284,7 +284,7 @@ export default function App(){
               isMobile?(
                 <div>{inRows.map(h=>(
                   <div key={h.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:10,padding:14,marginBottom:10}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:"monospace",fontSize:12,color:"#3FB950",fontWeight:600}}>📥 {h.date}</span><button style={btnD} onClick={()=>{setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました","info");}}>削除</button></div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:"monospace",fontSize:12,color:"#3FB950",fontWeight:600}}>📥 {h.date}</span><button style={btnD} onClick={()=>{if(h.jan){const ex=db.find(i=>i.jan===h.jan);if(ex)setDb(d=>d.map(i=>i.jan===h.jan?{...i,qty:Math.max(0,i.qty-(h.qty||0))}:i));}setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました（在庫-"+h.qty+"個）","info");}}>削除</button></div>
                     <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>{h.name}</div>
                     <div style={{fontFamily:"monospace",fontSize:10,color:"#484F58",marginBottom:8}}>{h.jan}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
@@ -311,7 +311,7 @@ export default function App(){
                         <td style={{...tdS,color:"#8B949E"}}>{h.maker||"—"}</td>
                         <td style={{...tdS,color:"#8B949E"}}>{h.supplier||"—"}</td>
                         <td style={{...tdS,color:"#484F58"}}>{h.note||"—"}</td>
-                        <td style={tdS}><button style={btnD} onClick={()=>{setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました","info");}}>削除</button></td>
+                        <td style={tdS}><button style={btnD} onClick={()=>{if(h.jan){const ex=db.find(i=>i.jan===h.jan);if(ex)setDb(d=>d.map(i=>i.jan===h.jan?{...i,qty:Math.max(0,i.qty-(h.qty||0))}:i));}setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました（在庫-"+h.qty+"個）","info");}}>削除</button></td>
                       </tr>
                     ))}</tbody>
                   </table>
@@ -337,7 +337,7 @@ export default function App(){
               isMobile?(
                 <div>{outRows.map(o=>(
                   <div key={o.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:10,padding:14,marginBottom:10}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:"monospace",fontSize:12,color:"#8B5CF6",fontWeight:600}}>📤 {o.date}</span><button style={btnD} onClick={()=>{setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました","info");}}>削除</button></div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontFamily:"monospace",fontSize:12,color:"#8B5CF6",fontWeight:600}}>📤 {o.date}</span><button style={btnD} onClick={()=>{if(o.jan){const ex=db.find(i=>i.jan===o.jan);if(ex)setDb(d=>d.map(i=>i.jan===o.jan?{...i,qty:i.qty+(o.qty||0)}:i));}setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました（在庫+"+o.qty+"個）","info");}}>削除</button></div>
                     <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>{o.name}</div>
                     <div style={{fontFamily:"monospace",fontSize:10,color:"#484F58",marginBottom:8}}>{o.jan}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
@@ -363,7 +363,7 @@ export default function App(){
                         <td style={{...tdS,fontFamily:"monospace",fontWeight:700,color:"#58A6FF",textAlign:"right"}}>{fmtY(o.totalPrice)}</td>
                         <td style={{...tdS,color:"#8B949E"}}>{o.destination||"—"}</td>
                         <td style={{...tdS,color:"#484F58"}}>{o.note||"—"}</td>
-                        <td style={tdS}><button style={btnD} onClick={()=>{setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました","info");}}>削除</button></td>
+                        <td style={tdS}><button style={btnD} onClick={()=>{if(o.jan){const ex=db.find(i=>i.jan===o.jan);if(ex)setDb(d=>d.map(i=>i.jan===o.jan?{...i,qty:i.qty+(o.qty||0)}:i));}setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました（在庫+"+o.qty+"個）","info");}}>削除</button></td>
                       </tr>
                     ))}</tbody>
                   </table>
