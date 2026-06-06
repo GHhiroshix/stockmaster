@@ -263,8 +263,8 @@ function ItemCard({ item, cats, onEdit, onDelete }) {
 // ── メインアプリ ──────────────────────────────────────
 export default function App() {
   const [tab, setTab]               = useState("inventory");
-  const [cats, setCats]             = useState(CATS_INITIAL);
-  const [db, setDb]                 = useState(INIT_DB);
+  const [cats, setCats] = useState(() => { try { const s = localStorage.getItem("sm_cats"); return s ? JSON.parse(s) : CATS_INITIAL; } catch(e) { return CATS_INITIAL; } });
+  const [db, setDb] = useState(() => { try { const s = localStorage.getItem("sm_db"); return s ? JSON.parse(s) : INIT_DB; } catch(e) { return INIT_DB; } });
   const [jan, setJan]               = useState("");
   const [loading, setLoading]       = useState(false);
   const [modal, setModal]           = useState(null);
@@ -296,6 +296,16 @@ export default function App() {
     window.addEventListener("resize", h);
     return () => window.removeEventListener("resize", h);
   }, []);
+
+  // localStorage保存
+  useEffect(() => { try { localStorage.setItem("sm_db", JSON.stringify(db)); } catch(e) {} }, [db]);
+  useEffect(() => { try { localStorage.setItem("sm_cats", JSON.stringify(cats)); } catch(e) {} }, [cats]);
+
+  function resetAllData() {
+    if (!window.confirm("全データをリセットしますか？この操作は元に戻せません。")) return;
+    localStorage.removeItem("sm_db"); localStorage.removeItem("sm_cats");
+    window.location.reload();
+  }
 
   const addToast = useCallback((msg, type="info") => {
     const id = Date.now() + Math.random();
@@ -468,6 +478,7 @@ export default function App() {
           <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600,color:"#58A6FF"}}>{fmtY(totalV)}</div><div style={{fontSize:9,color:"#484F58"}}>売価</div></div>
           <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600,color:"#3FB950"}}>{fmtY(totalV-totalC)}</div><div style={{fontSize:9,color:"#484F58"}}>含み益</div></div>
           {alerts.length>0 && <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600,color:"#F85149"}}>{alerts.length}</div><div style={{fontSize:9,color:"#484F58"}}>要発注</div></div>}
+          <button style={{background:"transparent",border:"1px solid #30363D",borderRadius:4,cursor:"pointer",color:"#484F58",fontSize:10,padding:"3px 8px"}} onClick={resetAllData} title="全データをリセット">リセット</button>
         </div>
       </div>
 
