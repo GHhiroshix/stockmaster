@@ -260,7 +260,7 @@ export default function App(){
             <div style={{fontSize:12,color:"#8B949E",marginBottom:8,fontWeight:600}}>JANコード手入力</div>
             <div style={{display:"flex",gap:8}}>
               <input ref={janRef}
-                style={{background:"#1C2128",border:"1px solid #30363D",borderRadius:6,color:"#E6EDF3",fontFamily:"monospace",fontSize:16,padding:"10px 12px",outline:"none",flex:1,letterSpacing:2}}
+                style={{background:"#1C2128",border:"1px solid #30363D",borderRadius:6,color:"#E6EDF3",fontFamily:"monospace",fontSize:16,padding:"10px 12px",outline:"none",flex:1,minWidth:0,letterSpacing:2}}
                 type="text" inputMode="numeric" placeholder="490XXXXXXXXXX"
                 value={jan}
                 onChange={e=>setJan(e.target.value.replace(/\D/g,"").slice(0,13))}
