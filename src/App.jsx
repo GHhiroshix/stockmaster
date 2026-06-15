@@ -216,24 +216,24 @@ export default function App(){
   }
 
   return(
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"#0D1117",color:"#E6EDF3",fontFamily:"system-ui,sans-serif",fontSize:14}}>
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"#0D1117",color:"#E6EDF3",fontFamily:"system-ui,sans-serif",fontSize:14,overflowX:"hidden"}}>
 
       {/* TOPBAR */}
-      <div style={{height:52,background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",position:"sticky",top:0,zIndex:300}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{fontSize:18,fontWeight:800}}>Stock<span style={{color:"#58A6FF"}}>Master</span></div>
-          <span style={{fontSize:10,color:"#484F58",background:"#21262D",border:"1px solid #30363D",padding:"2px 6px",borderRadius:4}}>💾 自動保存中</span>
+      <div style={{height:52,background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 12px",position:"sticky",top:0,zIndex:300,overflow:"hidden"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flexShrink:1}}>
+          <div style={{fontSize:18,fontWeight:800,whiteSpace:"nowrap"}}>Stock<span style={{color:"#58A6FF"}}>Master</span></div>
+          {!isMobile&&<span style={{fontSize:10,color:"#484F58",background:"#21262D",border:"1px solid #30363D",padding:"2px 6px",borderRadius:4,whiteSpace:"nowrap"}}>💾 自動保存中</span>}
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600}}>{db.length}</div><div style={{fontSize:9,color:"#484F58"}}>SKU</div></div>
-          <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600,color:"#58A6FF"}}>{fmtY(totalV)}</div><div style={{fontSize:9,color:"#484F58"}}>売価</div></div>
-          {alerts.length>0&&<div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600,color:"#F85149"}}>{alerts.length}</div><div style={{fontSize:9,color:"#484F58"}}>要発注</div></div>}
-          <button style={{background:"transparent",border:"1px solid #30363D",borderRadius:4,cursor:"pointer",color:"#484F58",fontSize:10,padding:"3px 8px"}} onClick={resetAllData}>リセット</button>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+          <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:600}}>{db.length}</div><div style={{fontSize:9,color:"#484F58"}}>SKU</div></div>
+          <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:600,color:"#58A6FF"}}>{fmtY(totalV)}</div><div style={{fontSize:9,color:"#484F58"}}>売価</div></div>
+          {alerts.length>0&&<div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:600,color:"#F85149"}}>{alerts.length}</div><div style={{fontSize:9,color:"#484F58"}}>要発注</div></div>}
+          <button style={{background:"transparent",border:"1px solid #30363D",borderRadius:4,cursor:"pointer",color:"#484F58",fontSize:10,padding:"3px 8px",whiteSpace:"nowrap"}} onClick={resetAllData}>リセット</button>
         </div>
       </div>
 
       {/* NAV */}
-      <div style={{background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",padding:"0 8px",overflowX:"auto"}}>
+      <div style={{background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",padding:"0 8px",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none"}}>
         {[["scan","📷 スキャン"],["inventory","📦 在庫"],["incoming","📥 入庫"],["outgoing","📤 出庫"],["dashboard","📊 グラフ"],["categories","🗂 分類"]].map(it=>(
           <div key={it[0]} style={{flexShrink:0,padding:"10px 12px",fontSize:13,fontWeight:500,color:tab===it[0]?"#58A6FF":"#8B949E",cursor:"pointer",borderBottom:tab===it[0]?"2px solid #58A6FF":"2px solid transparent"}} onClick={()=>setTab(it[0])}>
             {it[1]}{it[0]==="inventory"&&alerts.length>0&&<span style={{marginLeft:4,background:"#F85149",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:9,fontWeight:700}}>{alerts.length}</span>}
