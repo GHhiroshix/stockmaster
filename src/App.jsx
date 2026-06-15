@@ -212,24 +212,25 @@ export default function App(){
     return<span style={{cursor:"pointer",fontFamily:mono?"monospace":"inherit"}} onDoubleClick={()=>setEditItem({id:item.id,field})} title="ダブルクリックで編集">{display}</span>;
   }
   function FilterBar({from,setFrom,to,setTo,txt,setTxt,placeholder}){
-    return(<div style={{background:"#161B22",borderBottom:"1px solid #30363D",padding:12}}><div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input style={{...inpS,width:130}} type="date" value={from} onChange={e=>setFrom(e.target.value)}/><span style={{color:"#484F58",fontSize:12}}>〜</span><input style={{...inpS,width:130}} type="date" value={to} onChange={e=>setTo(e.target.value)}/><input style={{...inpS,flex:1,minWidth:120}} type="text" placeholder={placeholder} value={txt} onChange={e=>setTxt(e.target.value)}/>{(from||to||txt)&&<button style={btnG} onClick={()=>{setFrom("");setTo("");setTxt("");}}>クリア</button>}</div></div>);
+    return(<div style={{background:"#161B22",borderBottom:"1px solid #30363D",padding:12}}><div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}><input style={{...inpS,flex:1,minWidth:100,width:"auto"}} type="date" value={from} onChange={e=>setFrom(e.target.value)}/><span style={{color:"#484F58",fontSize:12,flexShrink:0}}>〜</span><input style={{...inpS,flex:1,minWidth:100,width:"auto"}} type="date" value={to} onChange={e=>setTo(e.target.value)}/><input style={{...inpS,width:"100%"}} type="text" placeholder={placeholder} value={txt} onChange={e=>setTxt(e.target.value)}/>{(from||to||txt)&&<button style={btnG} onClick={()=>{setFrom("");setTo("");setTxt("");}}>クリア</button>}</div></div>);
   }
 
   return(
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"#0D1117",color:"#E6EDF3",fontFamily:"system-ui,sans-serif",fontSize:14,overflowX:"hidden"}}>
 
       {/* TOPBAR */}
-      <div style={{height:52,background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 12px",position:"sticky",top:0,zIndex:300,overflow:"hidden"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flexShrink:1}}>
+      <div style={{background:"#161B22",borderBottom:"1px solid #30363D",position:"sticky",top:0,zIndex:300}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 12px",height:52}}>
           <div style={{fontSize:18,fontWeight:800,whiteSpace:"nowrap"}}>Stock<span style={{color:"#58A6FF"}}>Master</span></div>
-          {!isMobile&&<span style={{fontSize:10,color:"#484F58",background:"#21262D",border:"1px solid #30363D",padding:"2px 6px",borderRadius:4,whiteSpace:"nowrap"}}>💾 自動保存中</span>}
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {!isMobile&&<span style={{fontSize:10,color:"#484F58",background:"#21262D",border:"1px solid #30363D",padding:"2px 6px",borderRadius:4,whiteSpace:"nowrap"}}>💾 自動保存中</span>}
+            {!isMobile&&<div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:600}}>{db.length}</div><div style={{fontSize:9,color:"#484F58"}}>SKU</div></div>}
+            {!isMobile&&<div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:600,color:"#58A6FF"}}>{fmtY(totalV)}</div><div style={{fontSize:9,color:"#484F58"}}>売価</div></div>}
+            {alerts.length>0&&<span style={{background:"#F85149",color:"#fff",fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:10,whiteSpace:"nowrap"}}>⚠ {alerts.length}件 要発注</span>}
+            <button style={{background:"transparent",border:"1px solid #30363D",borderRadius:4,cursor:"pointer",color:"#484F58",fontSize:10,padding:"3px 8px",whiteSpace:"nowrap"}} onClick={resetAllData}>リセット</button>
+          </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-          <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:600}}>{db.length}</div><div style={{fontSize:9,color:"#484F58"}}>SKU</div></div>
-          <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:600,color:"#58A6FF"}}>{fmtY(totalV)}</div><div style={{fontSize:9,color:"#484F58"}}>売価</div></div>
-          {alerts.length>0&&<div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:600,color:"#F85149"}}>{alerts.length}</div><div style={{fontSize:9,color:"#484F58"}}>要発注</div></div>}
-          <button style={{background:"transparent",border:"1px solid #30363D",borderRadius:4,cursor:"pointer",color:"#484F58",fontSize:10,padding:"3px 8px",whiteSpace:"nowrap"}} onClick={resetAllData}>リセット</button>
-        </div>
+        {isMobile&&<div style={{display:"flex",gap:16,padding:"4px 12px 6px",fontSize:11,color:"#8B949E"}}><span><span style={{fontFamily:"monospace",fontWeight:700,color:"#E6EDF3"}}>{db.length}</span> SKU</span><span><span style={{fontFamily:"monospace",fontWeight:700,color:"#58A6FF"}}>{fmtY(totalV)}</span> 売価</span><span style={{fontSize:10,color:"#484F58"}}>💾 自動保存中</span></div>}
       </div>
 
       {/* NAV */}
