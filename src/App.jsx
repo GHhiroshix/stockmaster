@@ -179,15 +179,21 @@ export default function App(){
     if(authForm.password.length<6){setAuthError("パスワードは6文字以上にしてください");return;}
     setAuthBusy(true);setAuthError("");
     // 1. Supabase Auth ユーザー作成
-    const{data:authData,error:authErr}=await supabase.auth.signUp({email:authForm.email,password:authForm.password});
-    if(authErr){setAuthError(authErr.message);setAuthBusy(false);return;}
-    const userId=authData.user.id;
-    // 2. 会社作成
+    const{error:authErr}=await supabase.auth.signUp({email:authForm.email,password:authForm.password});
+    if(authErr&&authErr.message!=="User already registered"){setAuthError(authErr.message);setAuthBusy(false);return;}
+    // 2. サインインしてセッションを確立
+    const{data:signInData,error:signInErr}=await supabase.auth.signInWithPassword({email:authForm.email,password:authForm.password});
+    if(signInErr){setAuthError("ログインに失敗しました。もう一度お試しください");setAuthBusy(false);return;}
+    const userId=signInData.user.id;
+    // 3. 既存プロフィール確認
+    const{data:existingProf}=await supabase.from("profiles").select("id").eq("id",userId).maybeSingle();
+    if(existingProf){setAuthError("このアカウントは既に登録済みです。ログインしてください");setAuthBusy(false);return;}
+    // 4. 会社作成
     const{data:company,error:compErr}=await supabase.from("companies").insert({name:authForm.companyName}).select().single();
-    if(compErr){setAuthError("会社の作成に失敗しました");setAuthBusy(false);return;}
-    // 3. プロフィール作成（管理者）
+    if(compErr){setAuthError("会社の作成に失敗しました: "+compErr.message);setAuthBusy(false);return;}
+    // 5. プロフィール作成（管理者）
     const{error:profErr}=await supabase.from("profiles").insert({id:userId,company_id:company.id,name:authForm.userName,email:authForm.email,role:"admin"});
-    if(profErr){setAuthError("プロフィールの作成に失敗しました");setAuthBusy(false);return;}
+    if(profErr){setAuthError("プロフィールの作成に失敗しました: "+profErr.message);setAuthBusy(false);return;}
     setAuthBusy(false);
   }
 
@@ -195,16 +201,22 @@ export default function App(){
     if(!authForm.companyCode.trim()||!authForm.userName.trim()||!authForm.email.trim()||!authForm.password.trim()){setAuthError("すべての項目を入力してください");return;}
     if(authForm.password.length<6){setAuthError("パスワードは6文字以上にしてください");return;}
     setAuthBusy(true);setAuthError("");
-    // 会社コード確認
-    const{data:company}=await supabase.from("companies").select("id").eq("id",authForm.companyCode.trim()).single();
+    // 1. Auth ユーザー作成
+    const{error:authErr}=await supabase.auth.signUp({email:authForm.email,password:authForm.password});
+    if(authErr&&authErr.message!=="User already registered"){setAuthError(authErr.message);setAuthBusy(false);return;}
+    // 2. サインインしてセッションを確立
+    const{data:signInData,error:signInErr}=await supabase.auth.signInWithPassword({email:authForm.email,password:authForm.password});
+    if(signInErr){setAuthError("ログインに失敗しました。もう一度お試しください");setAuthBusy(false);return;}
+    const userId=signInData.user.id;
+    // 3. 会社コード確認
+    const{data:company}=await supabase.from("companies").select("id").eq("id",authForm.companyCode.trim()).maybeSingle();
     if(!company){setAuthError("会社コードが見つかりません。管理者に確認してください");setAuthBusy(false);return;}
-    // Auth ユーザー作成
-    const{data:authData,error:authErr}=await supabase.auth.signUp({email:authForm.email,password:authForm.password});
-    if(authErr){setAuthError(authErr.message);setAuthBusy(false);return;}
-    const userId=authData.user.id;
-    // プロフィール作成（スタッフ）
+    // 4. 既存プロフィール確認
+    const{data:existingProf}=await supabase.from("profiles").select("id").eq("id",userId).maybeSingle();
+    if(existingProf){setAuthError("このアカウントは既に登録済みです");setAuthBusy(false);return;}
+    // 5. プロフィール作成（スタッフ）
     const{error:profErr}=await supabase.from("profiles").insert({id:userId,company_id:company.id,name:authForm.userName,email:authForm.email,role:"staff"});
-    if(profErr){setAuthError("プロフィールの作成に失敗しました");setAuthBusy(false);return;}
+    if(profErr){setAuthError("プロフィールの作成に失敗しました: "+profErr.message);setAuthBusy(false);return;}
     setAuthBusy(false);
   }
 
