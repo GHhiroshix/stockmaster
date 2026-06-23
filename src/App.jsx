@@ -132,9 +132,14 @@ export default function App(){
       if(session) loadProfile(session.user.id);
       else setAuthLoading(false);
     });
-    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{
+    const{data:{subscription}}=supabase.auth.onAuthStateChange(async(_,session)=>{
       setSession(session);
-      if(!session){setProfile(null);setDb([]);setIncoming([]);setOutgoing([]);setCats(CATS_INITIAL);setAuthLoading(false);}
+      if(session){
+        // ログイン時にプロフィールを読み込む
+        await loadProfile(session.user.id);
+      } else {
+        setProfile(null);setDb([]);setIncoming([]);setOutgoing([]);setCats(CATS_INITIAL);setAuthLoading(false);
+      }
     });
     const h=()=>setIsMobile(window.innerWidth<1024);window.addEventListener("resize",h);
     return()=>{subscription.unsubscribe();window.removeEventListener("resize",h);};
