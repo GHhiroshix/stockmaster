@@ -95,6 +95,10 @@ export default function App(){
   const[authError,setAuthError]=useState("");
   const[authBusy,setAuthBusy]=useState(false);
   const[staffList,setStaffList]=useState([]);
+  const[staffForm,setStaffForm]=useState({name:"",email:"",password:""});
+  const[staffBusy,setStaffBusy]=useState(false);
+  const[staffError,setStaffError]=useState("");
+  const[staffSuccess,setStaffSuccess]=useState("");
 
   // ── アプリ状態 ────────────────────────────────────────
   const[tab,setTab]=useState("scan");
@@ -672,15 +676,31 @@ export default function App(){
       {tab==="staff"&&isAdmin&&(
         <div style={{padding:16}}>
           <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>👥 スタッフ管理</div>
+
+          {/* スタッフ追加フォーム */}
           <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16,marginBottom:16}}>
-            <div style={{fontSize:13,fontWeight:600,marginBottom:6}}>会社コード（スタッフへ共有）</div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <div style={{fontFamily:"monospace",fontSize:13,color:"#58A6FF",background:"#1C2128",padding:"8px 12px",borderRadius:6,flex:1,border:"1px solid #30363D",wordBreak:"break-all"}}>{profile.company_id}</div>
-              <button style={btnS} onClick={()=>{navigator.clipboard.writeText(profile.company_id);addToast("コピーしました","ok");}}>コピー</button>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>➕ スタッフを追加</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>氏名</div><input style={inpS} type="text" placeholder="例：田中 花子" value={staffForm.name} onChange={e=>setStaffForm(f=>({...f,name:e.target.value}))}/></div>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メールアドレス</div><input style={inpS} type="email" placeholder="例：tanaka@example.com" value={staffForm.email} onChange={e=>setStaffForm(f=>({...f,email:e.target.value}))}/></div>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>パスワード（6文字以上）</div><input style={inpS} type="password" placeholder="初期パスワードを設定" value={staffForm.password} onChange={e=>setStaffForm(f=>({...f,password:e.target.value}))}/></div>
+              {staffError&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#F85149"}}>{staffError}</div>}
+              {staffSuccess&&<div style={{background:"rgba(63,185,80,.1)",border:"1px solid rgba(63,185,80,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#3FB950"}}>{staffSuccess}</div>}
+              <button style={{...btnP,background:"#238636",opacity:staffBusy?0.6:1}} disabled={staffBusy} onClick={async()=>{
+                if(!staffForm.name||!staffForm.email||!staffForm.password){setStaffError("すべて入力してください");return;}
+                if(staffForm.password.length<6){setStaffError("パスワードは6文字以上");return;}
+                setStaffBusy(true);setStaffError("");setStaffSuccess("");
+                const res=await fetch("/api/create-staff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:staffForm.name,email:staffForm.email,password:staffForm.password,company_id:profile.company_id})});
+                const data=await res.json();
+                if(!res.ok){setStaffError(data.error||"エラーが発生しました");}
+                else{setStaffSuccess(staffForm.name+"さんを追加しました！");setStaffForm({name:"",email:"",password:""});loadStaff(profile.company_id);}
+                setStaffBusy(false);
+              }}>{staffBusy?"処理中…":"スタッフを追加する"}</button>
             </div>
-            <div style={{fontSize:11,color:"#484F58",marginTop:6}}>スタッフがアプリ登録時にこのコードを入力すると同じ会社として参加できます</div>
           </div>
-          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>メンバー一覧</div>
+
+          {/* メンバー一覧 */}
+          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>メンバー一覧（{staffList.length}名）</div>
           {staffList.map(s=>(
             <div key={s.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div>
@@ -821,4 +841,3 @@ export default function App(){
     </div>
   );
 }
-
