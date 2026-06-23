@@ -146,8 +146,16 @@ export default function App(){
   },[]);
 
   async function loadProfile(userId){
-    const{data}=await supabase.from("profiles").select("*").eq("id",userId).single();
-    if(data){setProfile(data);await loadData(data.company_id);}
+    const{data,error}=await supabase.from("profiles").select("*").eq("id",userId).maybeSingle();
+    if(data){
+      setProfile(data);
+      await loadData(data.company_id);
+    } else {
+      // プロフィールなし→サインアウトしてエラー表示
+      await supabase.auth.signOut();
+      setAuthError("アカウント登録が完了していません。もう一度新規登録してください");
+      setAuthMode("register-admin");
+    }
     setAuthLoading(false);
   }
 
