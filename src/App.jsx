@@ -703,11 +703,20 @@ export default function App(){
           <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>メンバー一覧（{staffList.length}名）</div>
           {staffList.map(s=>(
             <div key={s.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div>
+              <div style={{flex:1}}>
                 <div style={{fontWeight:600}}>{s.name}</div>
                 <div style={{fontSize:11,color:"#484F58"}}>{s.email}</div>
               </div>
-              <span style={{background:s.role==="admin"?"rgba(63,185,80,.12)":"rgba(88,166,255,.12)",color:s.role==="admin"?"#3FB950":"#58A6FF",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{s.role==="admin"?"👑 管理者":"👤 スタッフ"}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{background:s.role==="admin"?"rgba(63,185,80,.12)":"rgba(88,166,255,.12)",color:s.role==="admin"?"#3FB950":"#58A6FF",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{s.role==="admin"?"👑 管理者":"👤 スタッフ"}</span>
+                {s.id!==profile.id&&<button style={btnD} onClick={async()=>{
+                  if(!window.confirm(s.name+"さんを削除しますか？"))return;
+                  const res=await fetch("/api/delete-staff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:s.id,company_id:profile.company_id,requester_id:profile.id})});
+                  const data=await res.json();
+                  if(!res.ok){addToast(data.error||"エラーが発生しました","err");}
+                  else{addToast(s.name+"さんを削除しました","ok");loadStaff(profile.company_id);}
+                }}>削除</button>}
+              </div>
             </div>
           ))}
         </div>
