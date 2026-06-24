@@ -413,7 +413,7 @@ export default function App(){
 
           {/* タブ切り替え */}
           <div style={{display:"flex",background:"#161B22",borderRadius:8,padding:4,marginBottom:20,border:"1px solid #30363D"}}>
-            {[["login","ログイン"],["register-admin","新規登録（管理者）"],["register-staff","スタッフとして参加"]].map(([m,l])=>(
+            {[["login","ログイン"],["register-admin","新規登録（管理者）"]].map(([m,l])=>(
               <button key={m} style={{flex:1,padding:"8px 4px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:authMode===m?"#1F6FEB":"transparent",color:authMode===m?"#fff":"#8B949E",transition:"all .15s"}} onClick={()=>{setAuthMode(m);setAuthError("");}}>
                 {l}
               </button>
@@ -435,7 +435,7 @@ export default function App(){
             {authError&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#F85149"}}>{authError}</div>}
             {authMode==="register-admin"&&<div style={{background:"rgba(88,166,255,.1)",border:"1px solid rgba(88,166,255,.2)",borderRadius:6,padding:"8px 12px",fontSize:11,color:"#58A6FF"}}>登録後に「会社コード」が発行されます。スタッフへ共有するとチームで使えます。</div>}
             <button style={{...btnP,padding:"12px",fontSize:14,opacity:authBusy?0.6:1}} onClick={()=>{if(authMode==="login")handleLogin();else if(authMode==="register-admin")handleRegisterAdmin();else handleRegisterStaff();}} disabled={authBusy}>
-              {authBusy?"処理中…":authMode==="login"?"ログイン":authMode==="register-admin"?"管理者として登録":"スタッフとして参加"}
+              {authBusy?"処理中…":authMode==="login"?"ログイン":"管理者として登録"}
             </button>
           </div>
         </div>
