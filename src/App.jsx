@@ -38,6 +38,17 @@ const PRODUCTS={"4901777317895":{name:"コカ・コーラ 500ml",price:180},"490
 
 // ── ヘルパー関数 ──────────────────────────────────────
 function findL1(cats,id){return cats.find(c=>c.id===id)||null;}
+
+// ひらがな→カタカナ変換
+function toKana(str){return (str||"").replace(/[ぁ-ゖ]/g,c=>String.fromCharCode(c.charCodeAt(0)+0x60));}
+// カタカナ→ひらがな変換
+function toHira(str){return (str||"").replace(/[ァ-ヶ]/g,c=>String.fromCharCode(c.charCodeAt(0)-0x60));}
+// 日本語対応検索：ひらがな・カタカナ両方でヒット
+function jpMatch(target,query){
+  if(!target||!query)return false;
+  const t=target.toLowerCase();const q=query.toLowerCase();
+  return t.includes(q)||toKana(t).includes(toKana(q))||toHira(t).includes(toHira(q));
+}
 function findL2(cats,l1id,l2id){const l1=findL1(cats,l1id);return l1?(l1.children.find(c=>c.id===l2id)||null):null;}
 function findL3(cats,l1id,l2id,l3id){const l2=findL2(cats,l1id,l2id);return l2?(l2.children.find(c=>c.id===l3id)||null):null;}
 function fmtY(n){return "¥"+Number(n||0).toLocaleString();}
@@ -374,7 +385,13 @@ export default function App(){
   const alerts=useMemo(()=>db.filter(i=>i.qty<=(i.reorderPoint||0)),[db]);
   const totalV=db.reduce((s,i)=>s+i.price*i.qty,0);
   const totalC=db.reduce((s,i)=>s+(i.cost||0)*i.qty,0);
-  const rows=useMemo(()=>db.filter(i=>{if(fCat==="alert")return i.qty<=(i.reorderPoint||0);if(fCat==="")return !i.catL1;if(fCat!=="all")return i.catL1===fCat;return true;}).filter(i=>{if(!fTxt)return true;const t=fTxt.toLowerCase();return i.name.toLowerCase().includes(t)||i.jan.includes(t)||(i.maker||"").toLowerCase().includes(t);}),[db,fCat,fTxt]);
+  const rows=useMemo(()=>db.filter(i=>{if(fCat==="alert")return i.qty<=(i.reorderPoint||0);if(fCat==="")return !i.catL1;if(fCat!=="all")return i.catL1===fCat;return true;}).filter(i=>{
+    if(!fTxt)return true;
+    const l1name=findL1(cats,i.catL1)?.name||"";
+    const l2name=findL2(cats,i.catL1,i.catL2)?.name||"";
+    const l3name=findL3(cats,i.catL1,i.catL2,i.catL3)?.name||"";
+    return jpMatch(i.name,fTxt)||i.jan.includes(fTxt)||(i.maker&&jpMatch(i.maker,fTxt))||(i.supplier&&jpMatch(i.supplier,fTxt))||jpMatch(l1name,fTxt)||jpMatch(l2name,fTxt)||jpMatch(l3name,fTxt);
+  }),[db,cats,fCat,fTxt]);
   const inRows=useMemo(()=>incoming.filter(h=>{if(fInFrom&&h.date<fInFrom)return false;if(fInTo&&h.date>fInTo)return false;if(fInTxt){const t=fInTxt.toLowerCase();if(!h.name.toLowerCase().includes(t)&&!h.jan.includes(t)&&!(h.supplier||"").toLowerCase().includes(t))return false;}return true;}),[incoming,fInTxt,fInFrom,fInTo]);
   const outRows=useMemo(()=>outgoing.filter(o=>{if(fOutFrom&&o.date<fOutFrom)return false;if(fOutTo&&o.date>fOutTo)return false;if(fOutTxt){const t=fOutTxt.toLowerCase();if(!o.name.toLowerCase().includes(t)&&!o.jan.includes(t)&&!(o.destination||"").toLowerCase().includes(t))return false;}return true;}),[outgoing,fOutTxt,fOutFrom,fOutTo]);
   const recentActivity=useMemo(()=>[...incoming.map(h=>({...h,type:"in"})),...outgoing.map(o=>({...o,type:"out"}))].sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id).slice(0,8),[incoming,outgoing]);
