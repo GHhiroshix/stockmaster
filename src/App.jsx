@@ -135,6 +135,8 @@ export default function App(){
   const[fOutTxt,setFOutTxt]=useState("");const[fOutFrom,setFOutFrom]=useState("");const[fOutTo,setFOutTo]=useState("");
   const[editItem,setEditItem]=useState(null);const[showCamera,setShowCamera]=useState(false);
   const[isMobile,setIsMobile]=useState(window.innerWidth<1024);
+  const[isPhone,setIsPhone]=useState(window.innerWidth<640);
+  const[menuOpen,setMenuOpen]=useState(false);
   const[addCatModal,setAddCatModal]=useState(null);const[newCatName,setNewCatName]=useState("");const[newCatEmoji,setNewCatEmoji]=useState("📦");
   const janRef=useRef(null);
 
@@ -467,22 +469,23 @@ export default function App(){
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"#0D1117",color:"#E6EDF3",fontFamily:"system-ui,sans-serif",fontSize:14}}>
 
       {/* TOPBAR */}
-      <div style={{height:52,background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",position:"sticky",top:0,zIndex:300}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
+      <div style={{height:52,background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 12px",position:"sticky",top:0,zIndex:300}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {isPhone&&<button style={{background:"transparent",border:"none",cursor:"pointer",color:"#E6EDF3",fontSize:22,padding:"4px 6px",lineHeight:1}} onClick={()=>setMenuOpen(o=>!o)}>☰</button>}
           <div style={{fontSize:18,fontWeight:800}}>Stock<span style={{color:"#58A6FF"}}>Master</span></div>
-          <span style={{fontSize:10,color:isAdmin?"#3FB950":"#58A6FF",background:"#21262D",border:"1px solid #30363D",padding:"2px 6px",borderRadius:4}}>{isAdmin?"👑 管理者":"👤 スタッフ"}</span>
+          {!isPhone&&<span style={{fontSize:10,color:isAdmin?"#3FB950":"#58A6FF",background:"#21262D",border:"1px solid #30363D",padding:"2px 6px",borderRadius:4}}>{isAdmin?"👑 管理者":"👤 スタッフ"}</span>}
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600}}>{db.length}</div><div style={{fontSize:9,color:"#484F58"}}>SKU</div></div>
-          <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600,color:"#58A6FF"}}>{fmtY(totalV)}</div><div style={{fontSize:9,color:"#484F58"}}>売価</div></div>
-          {alerts.length>0&&<div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600,color:"#F85149"}}>{alerts.length}</div><div style={{fontSize:9,color:"#484F58"}}>要発注</div></div>}
-          <span style={{fontSize:11,color:"#8B949E"}}>{profile.name}</span>
-          <button style={{background:"transparent",border:"1px solid #30363D",borderRadius:4,cursor:"pointer",color:"#484F58",fontSize:10,padding:"3px 8px"}} onClick={handleLogout}>ログアウト</button>
+        <div style={{display:"flex",alignItems:"center",gap:isPhone?8:12}}>
+          {!isPhone&&<div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600}}>{db.length}</div><div style={{fontSize:9,color:"#484F58"}}>SKU</div></div>}
+          <div style={{textAlign:"right"}}><div style={{fontFamily:"monospace",fontSize:13,fontWeight:600,color:"#58A6FF"}}>{fmtY(totalV)}</div><div style={{fontSize:9,color:"#484F58"}}>{isPhone?"売価":"売価"}</div></div>
+          {alerts.length>0&&<div style={{background:"#F85149",color:"#fff",fontFamily:"monospace",fontSize:12,fontWeight:700,padding:"2px 7px",borderRadius:10}}>{alerts.length}⚠</div>}
+          {!isPhone&&<span style={{fontSize:11,color:"#8B949E"}}>{profile.name}</span>}
+          <button style={{background:"transparent",border:"1px solid #30363D",borderRadius:4,cursor:"pointer",color:"#484F58",fontSize:10,padding:"3px 8px",whiteSpace:"nowrap"}} onClick={handleLogout}>{isPhone?"退出":"ログアウト"}</button>
         </div>
       </div>
 
-      {/* NAV */}
-      <div style={{background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",padding:"0 8px",overflowX:"auto"}}>
+      {/* NAV - PC */}
+      {!isPhone&&<div style={{background:"#161B22",borderBottom:"1px solid #30363D",display:"flex",padding:"0 8px",overflowX:"auto"}}>
         {[
           ["scan","📷 スキャン"],
           ["inventory","📦 在庫一覧"],
@@ -494,7 +497,42 @@ export default function App(){
             {it[1]}{it[0]==="inventory"&&alerts.length>0&&<span style={{marginLeft:4,background:"#F85149",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:9,fontWeight:700}}>{alerts.length}</span>}
           </div>
         ))}
-      </div>
+      </div>}
+
+      {/* NAV - スマホ（現在のタブ表示） */}
+      {isPhone&&<div style={{background:"#161B22",borderBottom:"1px solid #30363D",padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontSize:13,fontWeight:600,color:"#58A6FF"}}>
+          {{"scan":"📷 スキャン","inventory":"📦 在庫一覧","incoming":"📥 入庫履歴","outgoing":"📤 出庫履歴","dashboard":"📊 分析","categories":"🗂 カテゴリ登録","staff":"👥 スタッフ管理"}[tab]}
+        </div>
+        <div style={{fontSize:11,color:"#484F58"}}>☰ メニューで切り替え</div>
+      </div>}
+
+      {/* ハンバーガーメニュードロワー */}
+      {isPhone&&menuOpen&&(
+        <div style={{position:"fixed",inset:0,zIndex:400}} onClick={()=>setMenuOpen(false)}>
+          <div style={{position:"absolute",top:52,left:0,right:0,background:"#161B22",borderBottom:"2px solid #30363D",boxShadow:"0 8px 24px rgba(0,0,0,.6)"}} onClick={e=>e.stopPropagation()}>
+            {[
+              ["scan","📷","スキャン"],
+              ["inventory","📦","在庫一覧"],
+              ["incoming","📥","入庫履歴"],
+              ["outgoing","📤","出庫履歴"],
+              ...(isAdmin?[["dashboard","📊","分析"],["categories","🗂","カテゴリ登録"],["staff","👥","スタッフ管理"]]:[]),
+            ].map(it=>(
+              <div key={it[0]} style={{display:"flex",alignItems:"center",gap:14,padding:"16px 20px",borderBottom:"1px solid #21262D",background:tab===it[0]?"rgba(88,166,255,.08)":"transparent",cursor:"pointer"}}
+                onClick={()=>{setTab(it[0]);if(it[0]==="staff")loadStaff(profile.company_id);setMenuOpen(false);}}>
+                <span style={{fontSize:22}}>{it[1]}</span>
+                <span style={{fontSize:16,fontWeight:tab===it[0]?700:400,color:tab===it[0]?"#58A6FF":"#E6EDF3"}}>{it[2]}</span>
+                {it[0]==="inventory"&&alerts.length>0&&<span style={{marginLeft:"auto",background:"#F85149",color:"#fff",fontSize:11,padding:"2px 8px",borderRadius:10,fontWeight:700}}>{alerts.length}</span>}
+                {tab===it[0]&&<span style={{marginLeft:"auto",color:"#58A6FF",fontSize:14}}>●</span>}
+              </div>
+            ))}
+            <div style={{padding:"14px 20px",display:"flex",alignItems:"center",gap:14,borderTop:"1px solid #30363D"}} onClick={()=>{handleLogout();setMenuOpen(false);}}>
+              <span style={{fontSize:22}}>🚪</span>
+              <span style={{fontSize:16,color:"#F85149"}}>ログアウト</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* スキャンタブ */}
       {tab==="scan"&&(
