@@ -536,7 +536,11 @@ export default function App(){
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 16px 6px"}}>
             <div style={{fontSize:14,fontWeight:700}}>商品マスタ <span style={{fontSize:12,color:"#484F58",fontWeight:400}}>({rows.length}件)</span></div>
             <div style={{display:"flex",gap:6}}>
-              <input style={{background:"#21262D",border:"1px solid #30363D",borderRadius:6,color:"#E6EDF3",fontSize:12,padding:"6px 10px",outline:"none",width:120}} placeholder="商品名/JAN…" value={fTxt} onChange={e=>setFTxt(e.target.value)}/>
+              <div style={{position:"relative",flex:1,maxWidth:360}}>
+                <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:16,pointerEvents:"none"}}>🔍</span>
+                <input style={{background:"#21262D",border:"2px solid #30363D",borderRadius:8,color:"#E6EDF3",fontSize:15,padding:"9px 12px 9px 38px",outline:"none",width:"100%",transition:"border-color .2s"}} placeholder="商品名・JAN・メーカー・カテゴリーで検索…" value={fTxt} onChange={e=>setFTxt(e.target.value)} onFocus={e=>e.target.style.borderColor="#58A6FF"} onBlur={e=>e.target.style.borderColor="#30363D"}/>
+                {fTxt&&<button style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",color:"#484F58",fontSize:16}} onClick={()=>setFTxt("")}>×</button>}
+              </div>
               <button style={{background:"rgba(63,185,80,.12)",color:"#3FB950",border:"1px solid rgba(63,185,80,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"6px 10px"}} onClick={()=>{exportCSV(db,cats);addToast("CSV出力","ok");}}>⬇ CSV</button>
               {isAdmin&&<button style={{background:"rgba(210,153,34,.12)",color:"#D29922",border:"1px solid rgba(210,153,34,.3)",borderRadius:6,cursor:"pointer",fontWeight:600,fontSize:12,padding:"6px 10px"}} onClick={()=>{exportInventoryCSV(db,cats);addToast("棚卸しCSV","ok");}}>📋 棚卸し</button>}
             </div>
