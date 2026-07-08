@@ -106,6 +106,8 @@ export default function App(){
   const[authError,setAuthError]=useState("");
   const[authBusy,setAuthBusy]=useState(false);
   const[staffList,setStaffList]=useState([]);
+  const[locations,setLocations]=useState([]); // 在庫場所マスタ
+  const[newLocation,setNewLocation]=useState("");
   const[staffForm,setStaffForm]=useState({name:"",email:"",password:""});
   const[staffBusy,setStaffBusy]=useState(false);
   const[staffError,setStaffError]=useState("");
@@ -178,16 +180,18 @@ export default function App(){
 
   async function loadData(companyId){
     setDataLoading(true);
-    const[prods,inc,out,catsRow]=await Promise.all([
+    const[prods,inc,out,catsRow,locsRow]=await Promise.all([
       supabase.from("products").select("*").eq("company_id",companyId).order("created_at",{ascending:false}),
       supabase.from("incoming").select("*").eq("company_id",companyId).order("date",{ascending:false}),
       supabase.from("outgoing").select("*").eq("company_id",companyId).order("date",{ascending:false}),
       supabase.from("categories").select("data").eq("id",companyId+":cats").maybeSingle(),
+      supabase.from("categories").select("data").eq("id",companyId+":locs").maybeSingle(),
     ]);
     if(prods.data) setDb(prods.data.map(prodFromDB));
     if(inc.data) setIncoming(inc.data.map(incFromDB));
     if(out.data) setOutgoing(out.data.map(outFromDB));
     if(catsRow.data?.data) setCats(catsRow.data.data);
+    if(locsRow.data?.data) setLocations(locsRow.data.data);
     setDataLoading(false);
   }
 
@@ -265,6 +269,16 @@ export default function App(){
     },1000);
     return()=>clearTimeout(timer);
   },[cats,profile]);
+
+  const locsRef=useRef(locations);
+  useEffect(()=>{locsRef.current=locations;},[locations]);
+  useEffect(()=>{
+    if(!profile||locations.length===0)return;
+    const timer=setTimeout(async()=>{
+      await supabase.from("categories").upsert({id:profile.company_id+":locs",company_id:profile.company_id,data:locsRef.current});
+    },800);
+    return()=>clearTimeout(timer);
+  },[locations,profile]);
 
   // ── スキャン処理 ──────────────────────────────────────
   const addToast=useCallback((msg,type="info")=>{const id=Date.now()+Math.random();setToasts(t=>[...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3400);},[]);
@@ -601,14 +615,14 @@ export default function App(){
                         <td style={{...tdS,fontSize:11,color:"#8B949E"}}>{l3?l3.name:"—"}</td>
                         <td style={tdS}>{EditCell(item,"maker",item.maker||"—",90,false)}</td>
                         <td style={tdS}>{EditCell(item,"supplier",item.supplier||"—",90,false)}</td>
-                        <td style={tdS}>{EditCell(item,"location",item.location||"—",80,false)}</td>
+                        <td style={tdS}><span style={{fontSize:12,background:item.location?"rgba(88,166,255,.12)":"transparent",color:item.location?"#58A6FF":"#484F58",padding:item.location?"2px 8px":"0",borderRadius:4}}>{item.location||"—"}</span></td>
                         <td style={{...tdS,fontFamily:"monospace",color:"#58A6FF",fontWeight:600}}>{EditCell(item,"price",fmtY(item.price),80,true)}</td>
                         <td style={{...tdS,fontFamily:"monospace",color:"#8B949E"}}>{EditCell(item,"cost",item.cost?fmtY(item.cost):"—",80,true)}</td>
                         <td style={{...tdS,fontFamily:"monospace",fontWeight:600,color:mCol(m)}}>{m!==null?m+"%":"—"}</td>
                         <td style={{...tdS,fontFamily:"monospace",fontWeight:700}}>{EditCell(item,"qty",item.qty,60,true)}</td>
                         <td style={{...tdS,fontFamily:"monospace",color:"#484F58"}}>{EditCell(item,"reorderPoint",item.reorderPoint||0,60,true)}</td>
                         <td style={tdS}>{item.qty===0?<span style={{background:"rgba(248,81,73,.12)",color:"#F85149",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>在庫なし</span>:isAl?<span style={{background:"rgba(248,81,73,.12)",color:"#F85149",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>⚠発注要</span>:item.qty<=5?<span style={{background:"rgba(210,153,34,.12)",color:"#D29922",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>残りわずか</span>:<span style={{background:"rgba(63,185,80,.12)",color:"#3FB950",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>在庫あり</span>}</td>
-                        <td style={tdS}>{EditCell(item,"location",item.location||"—",80,false)}</td><td style={{...tdS,fontSize:10,color:"#484F58"}}>{item.addedAt}</td>
+                        <td style={tdS}><span style={{fontSize:12,background:item.location?"rgba(88,166,255,.12)":"transparent",color:item.location?"#58A6FF":"#484F58",padding:item.location?"2px 8px":"0",borderRadius:4}}>{item.location||"—"}</span></td><td style={{...tdS,fontSize:10,color:"#484F58"}}>{item.addedAt}</td>
                         {isAdmin&&<td style={tdS}><button style={btnD} onClick={()=>deleteProduct(item.id)}>削除</button></td>}
                       </tr>
                     );})}</tbody>
@@ -715,6 +729,24 @@ export default function App(){
       {tab==="categories"&&isAdmin&&(
         <div style={{padding:16}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontSize:16,fontWeight:700}}>カテゴリ登録</div><button style={btnP} onClick={()=>openAddCat(1)}>+ 大分類を追加</button></div>
+          {/* 在庫場所マスタ */}
+          <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>📍 在庫場所マスタ</div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input style={{...inpS,flex:1}} type="text" placeholder="例：1F・2F・第2倉庫・他拠点" value={newLocation} onChange={e=>setNewLocation(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&newLocation.trim()){setLocations(l=>[...l,newLocation.trim()]);setNewLocation("");}}}/>
+              <button style={btnP} onClick={()=>{if(newLocation.trim()){setLocations(l=>[...l,newLocation.trim()]);setNewLocation("");}}}>追加</button>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {locations.length===0&&<div style={{fontSize:12,color:"#484F58"}}>まだ場所が登録されていません</div>}
+              {locations.map((loc,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:6,background:"#1C2128",border:"1px solid #30363D",borderRadius:6,padding:"6px 10px"}}>
+                  <span style={{color:"#58A6FF",fontWeight:600,fontSize:13}}>📍 {loc}</span>
+                  <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#F85149",fontSize:14,padding:"0 2px"}} onClick={()=>setLocations(l=>l.filter((_,j)=>j!==i))}>×</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {cats.map(l1=>(
             <div key={l1.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -848,7 +880,13 @@ export default function App(){
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>単価（円）</div><input style={inpS} type="number" min="0" value={editModal.price} onChange={e=>setEditModal(m=>({...m,price:Number(e.target.value)||0}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ値（円）</div><input style={inpS} type="number" min="0" value={editModal.cost||""} onChange={e=>setEditModal(m=>({...m,cost:Number(e.target.value)||0}))}/></div></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫数</div><input style={inpS} type="number" min="0" value={editModal.qty} onChange={e=>setEditModal(m=>({...m,qty:Number(e.target.value)||0}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>発注点</div><input style={inpS} type="number" min="0" value={editModal.reorderPoint||0} onChange={e=>setEditModal(m=>({...m,reorderPoint:Number(e.target.value)||0}))}/></div></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div><input style={inpS} type="text" value={editModal.maker||""} onChange={e=>setEditModal(m=>({...m,maker:e.target.value}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div><input style={inpS} type="text" value={editModal.supplier||""} onChange={e=>setEditModal(m=>({...m,supplier:e.target.value}))}/></div></div>
-              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫場所</div><input style={inpS} type="text" placeholder="例：1F・2F・他拠点" value={editModal.location||""} onChange={e=>setEditModal(m=>({...m,location:e.target.value}))}/></div>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫場所</div>
+                <select style={inpS} value={editModal.location||""} onChange={e=>setEditModal(m=>({...m,location:e.target.value}))}>
+                  <option value="">未設定</option>
+                  {locations.map(loc=><option key={loc} value={loc}>{loc}</option>)}
+                </select>
+                {locations.length===0&&<div style={{fontSize:10,color:"#484F58",marginTop:4}}>💡 カテゴリ登録タブで在庫場所を追加できます</div>}
+              </div>
               <CategorySelect cats={cats} l1={editModal.catL1||""} l2={editModal.catL2||""} l3={editModal.catL3||""} onChange={(l1,l2,l3)=>setEditModal(m=>({...m,catL1:l1,catL2:l2,catL3:l3}))} inpS={inpS}/>
             </div>
             <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}><button style={btnG} onClick={()=>setEditModal(null)}>キャンセル</button><button style={btnP} onClick={saveEditModal}>💾 保存する</button></div>
