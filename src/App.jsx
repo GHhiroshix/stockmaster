@@ -270,15 +270,25 @@ export default function App(){
     return()=>clearTimeout(timer);
   },[cats,profile]);
 
-  const locsRef=useRef(locations);
-  useEffect(()=>{locsRef.current=locations;},[locations]);
-  useEffect(()=>{
-    if(!profile||locations.length===0)return;
-    const timer=setTimeout(async()=>{
-      await supabase.from("categories").upsert({id:profile.company_id+":locs",company_id:profile.company_id,data:locsRef.current});
-    },800);
-    return()=>clearTimeout(timer);
-  },[locations,profile]);
+  // 場所マスタ保存
+  async function saveLocations(locs){
+    if(!profile)return;
+    await supabase.from("categories").upsert({id:profile.company_id+":locs",company_id:profile.company_id,data:locs});
+  }
+  function addLocation(){
+    if(!newLocation.trim())return;
+    const next=[...locations,newLocation.trim()];
+    setLocations(next);
+    saveLocations(next);
+    setNewLocation("");
+    addToast("場所を追加しました","ok");
+  }
+  function removeLocation(i){
+    const next=locations.filter((_,j)=>j!==i);
+    setLocations(next);
+    saveLocations(next);
+    addToast("削除しました","info");
+  }
 
   // ── スキャン処理 ──────────────────────────────────────
   const addToast=useCallback((msg,type="info")=>{const id=Date.now()+Math.random();setToasts(t=>[...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3400);},[]);
@@ -733,15 +743,15 @@ export default function App(){
           <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:16}}>
             <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>📍 在庫場所マスタ</div>
             <div style={{display:"flex",gap:8,marginBottom:10}}>
-              <input style={{...inpS,flex:1}} type="text" placeholder="例：1F・2F・第2倉庫・他拠点" value={newLocation} onChange={e=>setNewLocation(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&newLocation.trim()){setLocations(l=>[...l,newLocation.trim()]);setNewLocation("");}}}/>
-              <button style={btnP} onClick={()=>{if(newLocation.trim()){setLocations(l=>[...l,newLocation.trim()]);setNewLocation("");}}}>追加</button>
+              <input style={{...inpS,flex:1}} type="text" placeholder="例：1F・2F・第2倉庫・他拠点" value={newLocation} onChange={e=>setNewLocation(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addLocation();}}/>
+              <button style={btnP} onClick={addLocation}>追加</button>
             </div>
             <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
               {locations.length===0&&<div style={{fontSize:12,color:"#484F58"}}>まだ場所が登録されていません</div>}
               {locations.map((loc,i)=>(
                 <div key={i} style={{display:"flex",alignItems:"center",gap:6,background:"#1C2128",border:"1px solid #30363D",borderRadius:6,padding:"6px 10px"}}>
                   <span style={{color:"#58A6FF",fontWeight:600,fontSize:13}}>📍 {loc}</span>
-                  <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#F85149",fontSize:14,padding:"0 2px"}} onClick={()=>setLocations(l=>l.filter((_,j)=>j!==i))}>×</button>
+                  <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#F85149",fontSize:14,padding:"0 2px"}} onClick={()=>removeLocation(i)}>×</button>
                 </div>
               ))}
             </div>
