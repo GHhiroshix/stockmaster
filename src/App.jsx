@@ -621,18 +621,18 @@ export default function App(){
                       <tr key={item.id}>
                         <td style={{...tdS,fontFamily:"monospace",fontSize:10,color:"#484F58"}}>{EditCell(item,"jan",item.jan,110,true)}</td>
                         <td style={{...tdS,maxWidth:150}}>{EditCell(item,"name",item.name,130,false)}</td>
-                        <td style={tdS}>{l1?<span style={{fontSize:11,fontWeight:600}}>{l1.emoji} {l1.name}</span>:<span style={{color:"#484F58",fontSize:11}}>—</span>}</td>
-                        <td style={{...tdS,fontSize:11,color:"#8B949E"}}>{l3?l3.name:"—"}</td>
+                        <td style={{...tdS,cursor:"pointer"}} onClick={()=>setEditModal(item)} title="クリックで編集">{l1?<span style={{fontSize:11,fontWeight:600}}>{l1.emoji} {l1.name}</span>:<span style={{color:"#484F58",fontSize:11}}>—</span>}</td>
+                        <td style={{...tdS,fontSize:11,color:"#8B949E",cursor:"pointer"}} onClick={()=>setEditModal(item)} title="クリックで編集">{l3?l3.name:"—"}</td>
                         <td style={tdS}>{EditCell(item,"maker",item.maker||"—",90,false)}</td>
                         <td style={tdS}>{EditCell(item,"supplier",item.supplier||"—",90,false)}</td>
-                        <td style={tdS}><span style={{fontSize:12,background:item.location?"rgba(88,166,255,.12)":"transparent",color:item.location?"#58A6FF":"#484F58",padding:item.location?"2px 8px":"0",borderRadius:4}}>{item.location||"—"}</span></td>
+                        <td style={tdS}>{EditCell(item,"location",item.location||"—",90,false)}</td>
                         <td style={{...tdS,fontFamily:"monospace",color:"#58A6FF",fontWeight:600}}>{EditCell(item,"price",fmtY(item.price),80,true)}</td>
                         <td style={{...tdS,fontFamily:"monospace",color:"#8B949E"}}>{EditCell(item,"cost",item.cost?fmtY(item.cost):"—",80,true)}</td>
                         <td style={{...tdS,fontFamily:"monospace",fontWeight:600,color:mCol(m)}}>{m!==null?m+"%":"—"}</td>
                         <td style={{...tdS,fontFamily:"monospace",fontWeight:700}}>{EditCell(item,"qty",item.qty,60,true)}</td>
                         <td style={{...tdS,fontFamily:"monospace",color:"#484F58"}}>{EditCell(item,"reorderPoint",item.reorderPoint||0,60,true)}</td>
                         <td style={tdS}>{item.qty===0?<span style={{background:"rgba(248,81,73,.12)",color:"#F85149",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>在庫なし</span>:isAl?<span style={{background:"rgba(248,81,73,.12)",color:"#F85149",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>⚠発注要</span>:item.qty<=5?<span style={{background:"rgba(210,153,34,.12)",color:"#D29922",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>残りわずか</span>:<span style={{background:"rgba(63,185,80,.12)",color:"#3FB950",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>在庫あり</span>}</td>
-                        <td style={tdS}><span style={{fontSize:12,background:item.location?"rgba(88,166,255,.12)":"transparent",color:item.location?"#58A6FF":"#484F58",padding:item.location?"2px 8px":"0",borderRadius:4}}>{item.location||"—"}</span></td><td style={{...tdS,fontSize:10,color:"#484F58"}}>{item.addedAt}</td>
+                        <td style={{...tdS,fontSize:10,color:"#484F58"}}>{item.addedAt}</td>
                         {isAdmin&&<td style={tdS}><button style={btnD} onClick={()=>deleteProduct(item.id)}>削除</button></td>}
                       </tr>
                     );})}</tbody>
