@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
+import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { supabase } from "./supabase";
 
 // ── カテゴリー初期データ ──────────────────────────────
@@ -81,7 +82,21 @@ function exportOutgoingCSV(rows){const hdr="出庫日,JAN,商品名,出庫数量
 // ── カメラスキャナー ──────────────────────────────────
 function CameraScanner({onDetected,onClose}){
   const videoRef=useRef(null);const[err,setErr]=useState("");const[scanning,setScanning]=useState(false);
-  useEffect(()=>{let controls=null;const reader=new BrowserMultiFormatReader();(async()=>{try{const devices=await BrowserMultiFormatReader.listVideoInputDevices();const back=devices.find(d=>/back|rear|environment/i.test(d.label))||devices[devices.length-1];setScanning(true);controls=await reader.decodeFromVideoDevice(back?.deviceId,videoRef.current,(result)=>{if(result){onDetected(result.getText());controls?.stop();}});}catch(e){setErr("カメラエラー: "+e.message);}})();return()=>{controls?.stop();};},[onDetected]);
+  useEffect(()=>{let controls=null;
+    // JANコード(EAN-13/EAN-8)とよく使われるUPC-Aだけに絞ることで、
+    // 他形式(QRコードなど)まで毎フレーム総当たりする無駄をなくし判定を高速化
+    const hints=new Map();
+    hints.set(DecodeHintType.POSSIBLE_FORMATS,[BarcodeFormat.EAN_13,BarcodeFormat.EAN_8,BarcodeFormat.UPC_A]);
+    hints.set(DecodeHintType.TRY_HARDER,false);
+    const reader=new BrowserMultiFormatReader(hints);
+    (async()=>{try{
+      const devices=await BrowserMultiFormatReader.listVideoInputDevices();
+      const back=devices.find(d=>/back|rear|environment/i.test(d.label))||devices[devices.length-1];
+      setScanning(true);
+      const constraints={deviceId:back?.deviceId?{exact:back.deviceId}:undefined,facingMode:back?.deviceId?undefined:{ideal:"environment"},width:{ideal:1280},height:{ideal:720},focusMode:{ideal:"continuous"}};
+      controls=await reader.decodeFromConstraints({video:constraints},videoRef.current,(result)=>{if(result){onDetected(result.getText());controls?.stop();}});
+    }catch(e){setErr("カメラエラー: "+e.message);}})();
+    return()=>{controls?.stop();};},[onDetected]);
   return(<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.95)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20}}><div style={{fontSize:16,color:"#E6EDF3",marginBottom:16,fontWeight:700}}>📷 バーコードをスキャン</div>{err?<div style={{color:"#F85149",fontSize:13}}>{err}</div>:(<div style={{position:"relative"}}><video ref={videoRef} style={{width:"min(360px,90vw)",borderRadius:8,display:"block"}} playsInline muted/><div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:"70%",height:60,border:"2px solid #3FB950",borderRadius:4,boxShadow:"0 0 0 1000px rgba(0,0,0,.5)"}}/></div>)}{scanning&&!err&&<div style={{color:"#3FB950",fontSize:12,marginTop:10}}>バーコードをフレームに合わせてください</div>}<button style={{marginTop:20,background:"transparent",color:"#F85149",border:"1px solid rgba(248,81,73,.4)",borderRadius:6,padding:"10px 28px",cursor:"pointer",fontSize:14,fontWeight:700}} onClick={onClose}>キャンセル</button></div>);
 }
 
