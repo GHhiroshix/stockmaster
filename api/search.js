@@ -1,4 +1,3 @@
-
 // Vercel Serverless Function
 // Yahoo!ショッピング: ① jan_code検索 → ② キーワード検索 の順で試す
  
@@ -33,6 +32,7 @@ export default async function handler(req, res) {
           name:   h.name,
           price:  h.price || 0,
           brand:  (h.brand && h.brand.name) || "",
+          image:  (h.image && h.image.medium) || (h.image && h.image.small) || "",
           source: "Yahoo(JAN)",
         });
       }
@@ -56,6 +56,7 @@ export default async function handler(req, res) {
           name:   h.name,
           price:  h.price || 0,
           brand:  (h.brand && h.brand.name) || "",
+          image:  (h.image && h.image.medium) || (h.image && h.image.small) || "",
           source: "Yahoo(query)",
         });
       }
@@ -82,6 +83,7 @@ export default async function handler(req, res) {
           name:   name,
           price:  0,
           brand:  p.brands || "",
+          image:  p.image_url || p.image_front_url || "",
           source: "OpenFoodFacts",
         });
       }
