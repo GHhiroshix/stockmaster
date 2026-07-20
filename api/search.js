@@ -1,6 +1,13 @@
 // Vercel Serverless Function
 // Yahoo!ショッピング: ① jan_code検索 → ② キーワード検索 の順で試す
- 
+
+// Yahoo!のレスポンス形式は image が文字列だったり {small,medium,...} だったりするため吸収する
+function extractImage(h) {
+  if (!h || !h.image) return "";
+  if (typeof h.image === "string") return h.image;
+  return h.image.medium || h.image.small || h.image.url || "";
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
@@ -20,7 +27,7 @@ export default async function handler(req, res) {
   if (YAHOO_ID) {
     // ① jan_codeパラメータで検索（正確）
     try {
-      const url1 = "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=" + YAHOO_ID + "&jan_code=" + jan + "&results=1";
+      const url1 = "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=" + YAHOO_ID + "&jan_code=" + jan + "&results=1&image_size=300";
       const res1 = await fetch(url1);
       const data1 = await res1.json();
       console.log("[Yahoo jan_code] hits:", data1.totalResultsReturned);
@@ -32,7 +39,7 @@ export default async function handler(req, res) {
           name:   h.name,
           price:  h.price || 0,
           brand:  (h.brand && h.brand.name) || "",
-          image:  (h.image && h.image.medium) || (h.image && h.image.small) || "",
+          image:  extractImage(h),
           source: "Yahoo(JAN)",
         });
       }
@@ -42,7 +49,7 @@ export default async function handler(req, res) {
  
     // ② キーワード検索でJANコードを探す（jan_codeで0件の場合の保険）
     try {
-      const url2 = "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=" + YAHOO_ID + "&query=" + jan + "&results=5";
+      const url2 = "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?appid=" + YAHOO_ID + "&query=" + jan + "&results=5&image_size=300";
       const res2 = await fetch(url2);
       const data2 = await res2.json();
       console.log("[Yahoo query] hits:", data2.totalResultsReturned);
@@ -56,7 +63,7 @@ export default async function handler(req, res) {
           name:   h.name,
           price:  h.price || 0,
           brand:  (h.brand && h.brand.name) || "",
-          image:  (h.image && h.image.medium) || (h.image && h.image.small) || "",
+          image:  extractImage(h),
           source: "Yahoo(query)",
         });
       }
