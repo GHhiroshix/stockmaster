@@ -59,8 +59,8 @@ function today(){return new Date().toISOString().slice(0,10);}
 function dl(content,filename){const blob=new Blob([content],{type:"text/csv;charset=utf-8;"});Object.assign(document.createElement("a"),{href:URL.createObjectURL(blob),download:filename}).click();}
 
 // DB変換関数
-function prodFromDB(r){return{id:r.id,jan:r.jan,name:r.name,price:r.price,cost:r.cost,qty:r.qty,reorderPoint:r.reorder_point,catL1:r.cat_l1||"",catL2:r.cat_l2||"",catL3:r.cat_l3||"",maker:r.maker||"",supplier:r.supplier||"",location:r.location||"",addedAt:r.added_at};}
-function prodToDB(i,cid){return{company_id:cid,jan:i.jan,name:i.name,price:i.price||0,cost:i.cost||0,qty:i.qty||0,reorder_point:i.reorderPoint||5,cat_l1:i.catL1||"",cat_l2:i.catL2||"",cat_l3:i.catL3||"",maker:i.maker||"",supplier:i.supplier||"",added_at:i.addedAt||today(),location:i.location||""};}
+function prodFromDB(r){return{id:r.id,jan:r.jan,name:r.name,price:r.price,cost:r.cost,qty:r.qty,reorderPoint:r.reorder_point,catL1:r.cat_l1||"",catL2:r.cat_l2||"",catL3:r.cat_l3||"",maker:r.maker||"",supplier:r.supplier||"",location:r.location||"",addedAt:r.added_at,imageUrl:r.image_url||""};}
+function prodToDB(i,cid){return{company_id:cid,jan:i.jan,name:i.name,price:i.price||0,cost:i.cost||0,qty:i.qty||0,reorder_point:i.reorderPoint||5,cat_l1:i.catL1||"",cat_l2:i.catL2||"",cat_l3:i.catL3||"",maker:i.maker||"",supplier:i.supplier||"",added_at:i.addedAt||today(),location:i.location||"",image_url:i.imageUrl||""};}
 function incFromDB(r){return{id:r.id,date:r.date,jan:r.jan,name:r.name,qty:r.qty,cost:r.cost,totalCost:r.total_cost,maker:r.maker||"",supplier:r.supplier||"",note:r.note||""};}
 function incToDB(r,cid){return{company_id:cid,date:r.date,jan:r.jan,name:r.name,qty:r.qty,cost:r.cost||0,total_cost:r.totalCost||0,maker:r.maker||"",supplier:r.supplier||"",note:r.note||""};}
 function outFromDB(r){return{id:r.id,date:r.date,jan:r.jan,name:r.name,qty:r.qty,price:r.price,totalPrice:r.total_price,destination:r.destination||"",note:r.note||""};}
@@ -322,7 +322,7 @@ export default function App(){
     setLoading(true);addToast("商品情報を検索中…","info");
     try{
       const res=await fetch("/api/search?jan="+encodeURIComponent(code));const data=await res.json();
-      const product=res.ok&&data.name?{jan:code,name:data.name,price:data.price||0,cost:0}:{jan:code,name:"商品 (JAN:"+code+")",price:0,cost:0};
+      const product=res.ok&&data.name?{jan:code,name:data.name,price:data.price||0,cost:0,imageUrl:data.image||""}:{jan:code,name:"商品 (JAN:"+code+")",price:0,cost:0,imageUrl:""};
       if(res.ok&&data.name)addToast("商品情報を取得しました","ok");else addToast("商品が見つかりません。手入力してください","info");
       openScanModal(product,db.find(i=>i.jan===code)||null);setJan("");
     }catch(e){openScanModal({jan:code,name:"商品 (JAN:"+code+")",price:0,cost:0},db.find(i=>i.jan===code)||null);setJan("");addToast("通信エラー。手入力してください","err");}
@@ -631,9 +631,10 @@ export default function App(){
               {rows.length===0?<div style={{padding:"40px 20px",textAlign:"center",color:"#484F58"}}><div style={{fontSize:40}}>📋</div>商品がありません</div>:(
                 <div style={{background:"#21262D",borderRadius:8,border:"1px solid #30363D",overflow:"hidden",marginTop:4}}>
                   <table style={{width:"100%",borderCollapse:"collapse",minWidth:1000}}>
-                    <thead><tr style={{background:"#1C2128"}}>{["JAN","商品名","大分類","小分類","メーカー","仕入れ先","場所","単価","仕入れ値","粗利率","在庫","発注点","状態","登録日",...(isAdmin?[""]:[])] .map(h=><th key={h} style={thS}>{h}</th>)}</tr></thead>
+                    <thead><tr style={{background:"#1C2128"}}>{["画像","JAN","商品名","大分類","小分類","メーカー","仕入れ先","場所","単価","仕入れ値","粗利率","在庫","発注点","状態","登録日",...(isAdmin?[""]:[])] .map(h=><th key={h} style={thS}>{h}</th>)}</tr></thead>
                     <tbody>{rows.map(item=>{const m=calcM(item.price,item.cost);const isAl=item.qty<=(item.reorderPoint||0);const l1=findL1(cats,item.catL1);const l3=findL3(cats,item.catL1,item.catL2,item.catL3);return(
                       <tr key={item.id}>
+                        <td style={tdS}>{item.imageUrl?<img src={item.imageUrl} alt="" style={{width:32,height:32,objectFit:"contain",borderRadius:4,background:"#fff"}} onError={e=>{e.target.style.display="none";}}/>:<span style={{color:"#484F58",fontSize:11}}>—</span>}</td>
                         <td style={{...tdS,fontFamily:"monospace",fontSize:10,color:"#484F58"}}>{EditCell(item,"jan",item.jan,110,true)}</td>
                         <td style={{...tdS,maxWidth:150}}>{EditCell(item,"name",item.name,130,false)}</td>
                         <td style={{...tdS,cursor:"pointer"}} onClick={()=>setEditModal(item)} title="クリックで編集">{l1?<span style={{fontSize:11,fontWeight:600}}>{l1.emoji} {l1.name}</span>:<span style={{color:"#484F58",fontSize:11}}>—</span>}</td>
