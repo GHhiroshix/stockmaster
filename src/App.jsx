@@ -183,6 +183,14 @@ export default function App(){
 
   async function loadProfile(userId){
     const{data,error}=await supabase.from("profiles").select("*").eq("id",userId).maybeSingle();
+    if(data&&data.role==="staff"&&data.is_approved===false){
+      // 管理者の承認待ちのスタッフはログインさせない
+      await supabase.auth.signOut();
+      setAuthError("まだ管理者の承認が済んでいません。承認されるまでお待ちください。");
+      setAuthMode("login");
+      setAuthLoading(false);
+      return;
+    }
     if(data){
       setProfile(data);
       await loadData(data.company_id);
@@ -265,9 +273,13 @@ export default function App(){
     // 4. 既存プロフィール確認
     const{data:existingProf}=await supabase.from("profiles").select("id").eq("id",userId).maybeSingle();
     if(existingProf){setAuthError("このアカウントは既に登録済みです");setAuthBusy(false);return;}
-    // 5. プロフィール作成（スタッフ）
-    const{error:profErr}=await supabase.from("profiles").insert({id:userId,company_id:company.id,name:authForm.userName,email:authForm.email,role:"staff"});
+    // 5. プロフィール作成（スタッフ・承認待ち状態）
+    const{error:profErr}=await supabase.from("profiles").insert({id:userId,company_id:company.id,name:authForm.userName,email:authForm.email,role:"staff",is_approved:false});
     if(profErr){setAuthError("プロフィールの作成に失敗しました: "+profErr.message);setAuthBusy(false);return;}
+    // 承認されるまで使えないので、いったんサインアウトして案内を出す
+    await supabase.auth.signOut();
+    setAuthMode("login");
+    setAuthError("登録が完了しました。管理者の承認をお待ちください。承認されるとログインできるようになります。");
     setAuthBusy(false);
   }
 
@@ -819,9 +831,38 @@ export default function App(){
             </div>
           </div>
 
-          {/* メンバー一覧 */}
-          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>メンバー一覧（{staffList.length}名）</div>
-          {staffList.map(s=>(
+          {/* 承認待ちスタッフ */}
+          {staffList.filter(s=>s.role==="staff"&&s.is_approved===false).length>0&&(
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:10,color:"#D29922"}}>⏳ 承認待ち（{staffList.filter(s=>s.role==="staff"&&s.is_approved===false).length}名）</div>
+              {staffList.filter(s=>s.role==="staff"&&s.is_approved===false).map(s=>(
+                <div key={s.id} style={{background:"rgba(210,153,34,.08)",border:"1px solid rgba(210,153,34,.3)",borderRadius:8,padding:14,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600}}>{s.name}</div>
+                    <div style={{fontSize:11,color:"#484F58"}}>{s.email}</div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <button style={{...btnP,background:"#238636",padding:"6px 14px",fontSize:12}} onClick={async()=>{
+                      const{error}=await supabase.from("profiles").update({is_approved:true}).eq("id",s.id);
+                      if(error){addToast("承認に失敗しました: "+error.message,"err");}
+                      else{addToast(s.name+"さんを承認しました","ok");loadStaff(profile.company_id);}
+                    }}>✓ 承認する</button>
+                    <button style={btnD} onClick={async()=>{
+                      if(!window.confirm(s.name+"さんの登録を却下して削除しますか？"))return;
+                      const res=await fetch("/api/delete-staff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:s.id,company_id:profile.company_id,requester_id:profile.id})});
+                      const data=await res.json();
+                      if(!res.ok){addToast(data.error||"エラーが発生しました","err");}
+                      else{addToast(s.name+"さんを削除しました","ok");loadStaff(profile.company_id);}
+                    }}>却下</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* メンバー一覧（承認済みのみ） */}
+          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>メンバー一覧（{staffList.filter(s=>s.role==="admin"||s.is_approved!==false).length}名）</div>
+          {staffList.filter(s=>s.role==="admin"||s.is_approved!==false).map(s=>(
             <div key={s.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div style={{flex:1}}>
                 <div style={{fontWeight:600}}>{s.name}</div>
