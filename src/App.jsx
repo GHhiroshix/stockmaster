@@ -284,39 +284,6 @@ export default function App(){
     }
   }
 
-  async function handleRegisterStaff(){
-    if(!authForm.companyCode.trim()||!authForm.userName.trim()||!authForm.email.trim()||!authForm.password.trim()){setAuthError("すべての項目を入力してください");return;}
-    if(authForm.password.length<6){setAuthError("パスワードは6文字以上にしてください");return;}
-    setAuthBusy(true);setAuthError("");
-    registeringRef.current=true;
-    try{
-    // 1. Auth ユーザー作成
-    const{error:authErr}=await supabase.auth.signUp({email:authForm.email,password:authForm.password});
-    if(authErr&&authErr.message!=="User already registered"){setAuthError(authErr.message);return;}
-    // 2. サインインしてセッションを確立
-    const{data:signInData,error:signInErr}=await supabase.auth.signInWithPassword({email:authForm.email,password:authForm.password});
-    if(signInErr){setAuthError("ログインに失敗しました。もう一度お試しください");return;}
-    const userId=signInData.user.id;
-    // 3. 会社コード確認
-    const{data:company}=await supabase.from("companies").select("id").eq("id",authForm.companyCode.trim()).maybeSingle();
-    if(!company){setAuthError("会社コードが見つかりません。管理者に確認してください");return;}
-    // 4. 既存プロフィール確認
-    const{data:existingProf}=await supabase.from("profiles").select("id").eq("id",userId).maybeSingle();
-    if(existingProf){setAuthError("このアカウントは既に登録済みです");return;}
-    // 5. プロフィール作成（スタッフ・承認待ち状態）
-    const{error:profErr}=await supabase.from("profiles").insert({id:userId,company_id:company.id,name:authForm.userName,email:authForm.email,role:"staff",is_approved:false});
-    if(profErr){setAuthError("プロフィールの作成に失敗しました: "+profErr.message);return;}
-    // 承認されるまで使えないので、セッションをここで完全に破棄してから案内を出す
-    await supabase.auth.signOut();
-    setSession(null);setProfile(null);
-    setAuthMode("login");
-    setAuthError("登録が完了しました。管理者の承認をお待ちください。承認されるとログインできるようになります。");
-    }finally{
-      registeringRef.current=false;
-      setAuthBusy(false);
-    }
-  }
-
   async function handleLogout(){
     await supabase.auth.signOut();
     setProfile(null);setDb([]);setIncoming([]);setOutgoing([]);setCats(CATS_INITIAL);setTab("scan");
@@ -519,7 +486,7 @@ export default function App(){
 
           {/* タブ切り替え */}
           <div style={{display:"flex",background:"#161B22",borderRadius:8,padding:4,marginBottom:20,border:"1px solid #30363D"}}>
-            {[["login","ログイン"],["register-admin","新規登録（管理者）"],["register-staff","新規登録（スタッフ）"]].map(([m,l])=>(
+            {[["login","ログイン"],["register-admin","新規登録（管理者）"]].map(([m,l])=>(
               <button key={m} style={{flex:1,padding:"8px 4px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:authMode===m?"#1F6FEB":"transparent",color:authMode===m?"#fff":"#8B949E",transition:"all .15s"}} onClick={()=>{setAuthMode(m);setAuthError("");}}>
                 {l}
               </button>
@@ -530,18 +497,15 @@ export default function App(){
             {authMode==="register-admin"&&(
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>会社名・店舗名</div><input style={inpS} type="text" placeholder="例：清水商店" value={authForm.companyName} onChange={e=>setAuthForm(f=>({...f,companyName:e.target.value}))}/></div>
             )}
-            {authMode==="register-staff"&&(
-              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>会社コード（管理者から入手）</div><input style={inpS} type="text" placeholder="管理者から共有されたコード" value={authForm.companyCode} onChange={e=>setAuthForm(f=>({...f,companyCode:e.target.value}))}/></div>
-            )}
             {authMode!=="login"&&(
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>氏名</div><input style={inpS} type="text" placeholder="例：清水 寛" value={authForm.userName} onChange={e=>setAuthForm(f=>({...f,userName:e.target.value}))}/></div>
             )}
             <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メールアドレス</div><input style={inpS} type="email" placeholder="example@email.com" value={authForm.email} onChange={e=>setAuthForm(f=>({...f,email:e.target.value}))}/></div>
-            <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>パスワード{authMode!=="login"&&<span style={{color:"#484F58"}}> (6文字以上)</span>}</div><input style={inpS} type="password" placeholder="パスワード" value={authForm.password} onChange={e=>setAuthForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>{if(e.key==="Enter"&&!authBusy){if(authMode==="login")handleLogin();else if(authMode==="register-admin")handleRegisterAdmin();else handleRegisterStaff();}}}/></div>
+            <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>パスワード{authMode!=="login"&&<span style={{color:"#484F58"}}> (6文字以上)</span>}</div><input style={inpS} type="password" placeholder="パスワード" value={authForm.password} onChange={e=>setAuthForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>{if(e.key==="Enter"&&!authBusy){if(authMode==="login")handleLogin();else handleRegisterAdmin();}}}/></div>
             {authError&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#F85149"}}>{authError}</div>}
-            {authMode==="register-admin"&&<div style={{background:"rgba(88,166,255,.1)",border:"1px solid rgba(88,166,255,.2)",borderRadius:6,padding:"8px 12px",fontSize:11,color:"#58A6FF"}}>登録後に「会社コード」が発行されます。スタッフへ共有するとチームで使えます。</div>}
-            <button style={{...btnP,padding:"12px",fontSize:14,opacity:authBusy?0.6:1}} onClick={()=>{if(authMode==="login")handleLogin();else if(authMode==="register-admin")handleRegisterAdmin();else handleRegisterStaff();}} disabled={authBusy}>
-              {authBusy?"処理中…":authMode==="login"?"ログイン":authMode==="register-admin"?"管理者として登録":"スタッフとして登録"}
+            {authMode==="register-admin"&&<div style={{background:"rgba(88,166,255,.1)",border:"1px solid rgba(88,166,255,.2)",borderRadius:6,padding:"8px 12px",fontSize:11,color:"#58A6FF"}}>登録後、運営の承認をお待ちください。承認後、ログインしてから「スタッフ管理」画面でスタッフを追加できます。</div>}
+            <button style={{...btnP,padding:"12px",fontSize:14,opacity:authBusy?0.6:1}} onClick={()=>{if(authMode==="login")handleLogin();else handleRegisterAdmin();}} disabled={authBusy}>
+              {authBusy?"処理中…":authMode==="login"?"ログイン":"管理者として登録"}
             </button>
           </div>
         </div>
@@ -845,15 +809,6 @@ export default function App(){
         <div style={{padding:16}}>
           <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>👥 スタッフ管理</div>
 
-          {/* 会社コード表示 */}
-          <div style={{background:"rgba(88,166,255,.08)",border:"1px solid rgba(88,166,255,.25)",borderRadius:8,padding:14,marginBottom:16}}>
-            <div style={{fontSize:11,color:"#8B949E",marginBottom:6}}>🔑 会社コード（スタッフの新規登録時に必要）</div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <code style={{flex:1,fontFamily:"monospace",fontSize:12,color:"#58A6FF",background:"#0D1117",padding:"8px 10px",borderRadius:6,overflowX:"auto",whiteSpace:"nowrap"}}>{profile.company_id}</code>
-              <button style={{...btnP,padding:"8px 14px",fontSize:12}} onClick={()=>{navigator.clipboard.writeText(profile.company_id);addToast("会社コードをコピーしました","ok");}}>コピー</button>
-            </div>
-          </div>
-
           {/* スタッフ追加フォーム */}
           <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16,marginBottom:16}}>
             <div style={{fontSize:13,fontWeight:600,marginBottom:12}}>➕ スタッフを追加</div>
@@ -876,38 +831,9 @@ export default function App(){
             </div>
           </div>
 
-          {/* 承認待ちスタッフ */}
-          {staffList.filter(s=>s.role==="staff"&&s.is_approved===false).length>0&&(
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:13,fontWeight:600,marginBottom:10,color:"#D29922"}}>⏳ 承認待ち（{staffList.filter(s=>s.role==="staff"&&s.is_approved===false).length}名）</div>
-              {staffList.filter(s=>s.role==="staff"&&s.is_approved===false).map(s=>(
-                <div key={s.id} style={{background:"rgba(210,153,34,.08)",border:"1px solid rgba(210,153,34,.3)",borderRadius:8,padding:14,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontWeight:600}}>{s.name}</div>
-                    <div style={{fontSize:11,color:"#484F58"}}>{s.email}</div>
-                  </div>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <button style={{...btnP,background:"#238636",padding:"6px 14px",fontSize:12}} onClick={async()=>{
-                      const{error}=await supabase.from("profiles").update({is_approved:true}).eq("id",s.id);
-                      if(error){addToast("承認に失敗しました: "+error.message,"err");}
-                      else{addToast(s.name+"さんを承認しました","ok");loadStaff(profile.company_id);}
-                    }}>✓ 承認する</button>
-                    <button style={btnD} onClick={async()=>{
-                      if(!window.confirm(s.name+"さんの登録を却下して削除しますか？"))return;
-                      const res=await fetch("/api/delete-staff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:s.id,company_id:profile.company_id,requester_id:profile.id})});
-                      const data=await res.json();
-                      if(!res.ok){addToast(data.error||"エラーが発生しました","err");}
-                      else{addToast(s.name+"さんを削除しました","ok");loadStaff(profile.company_id);}
-                    }}>却下</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* メンバー一覧（承認済みのみ） */}
-          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>メンバー一覧（{staffList.filter(s=>s.role==="admin"||s.is_approved!==false).length}名）</div>
-          {staffList.filter(s=>s.role==="admin"||s.is_approved!==false).map(s=>(
+          {/* メンバー一覧 */}
+          <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>メンバー一覧（{staffList.length}名）</div>
+          {staffList.map(s=>(
             <div key={s.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div style={{flex:1}}>
                 <div style={{fontWeight:600}}>{s.name}</div>
