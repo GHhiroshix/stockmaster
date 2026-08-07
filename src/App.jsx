@@ -158,6 +158,9 @@ export default function App(){
   const[menuOpen,setMenuOpen]=useState(false);
   const[addCatModal,setAddCatModal]=useState(null);const[newCatName,setNewCatName]=useState("");const[newCatEmoji,setNewCatEmoji]=useState("📦");
   const janRef=useRef(null);
+  // 新規登録処理の最中は、裏で動いている自動ログイン監視処理(onAuthStateChange)が
+  // 割り込んでレースコンディション(処理の競合)を起こさないようにするための目印
+  const registeringRef=useRef(false);
 
   const isAdmin=profile?.role==="admin";
 
@@ -169,6 +172,7 @@ export default function App(){
       else setAuthLoading(false);
     });
     const{data:{subscription}}=supabase.auth.onAuthStateChange(async(_,session)=>{
+      if(registeringRef.current)return; // 登録処理の最中はここで何もしない（競合防止）
       setSession(session);
       if(session){
         // ログイン時にプロフィールを読み込む
@@ -237,50 +241,65 @@ export default function App(){
     if(!authForm.companyName.trim()||!authForm.userName.trim()||!authForm.email.trim()||!authForm.password.trim()){setAuthError("すべての項目を入力してください");return;}
     if(authForm.password.length<6){setAuthError("パスワードは6文字以上にしてください");return;}
     setAuthBusy(true);setAuthError("");
+    registeringRef.current=true;
+    try{
     // 1. Supabase Auth ユーザー作成
     const{error:authErr}=await supabase.auth.signUp({email:authForm.email,password:authForm.password});
-    if(authErr&&authErr.message!=="User already registered"){setAuthError(authErr.message);setAuthBusy(false);return;}
+    if(authErr&&authErr.message!=="User already registered"){setAuthError(authErr.message);return;}
     // 2. サインインしてセッションを確立
     const{data:signInData,error:signInErr}=await supabase.auth.signInWithPassword({email:authForm.email,password:authForm.password});
-    if(signInErr){setAuthError("ログインに失敗しました。もう一度お試しください");setAuthBusy(false);return;}
+    if(signInErr){setAuthError("ログインに失敗しました。もう一度お試しください");return;}
     const userId=signInData.user.id;
     // 3. 既存プロフィール確認
     const{data:existingProf}=await supabase.from("profiles").select("id").eq("id",userId).maybeSingle();
-    if(existingProf){setAuthError("このアカウントは既に登録済みです。ログインしてください");setAuthBusy(false);return;}
+    if(existingProf){setAuthError("このアカウントは既に登録済みです。ログインしてください");return;}
     // 4. 会社作成
     const{data:company,error:compErr}=await supabase.from("companies").insert({name:authForm.companyName}).select().single();
-    if(compErr){setAuthError("会社の作成に失敗しました: "+compErr.message);setAuthBusy(false);return;}
+    if(compErr){setAuthError("会社の作成に失敗しました: "+compErr.message);return;}
     // 5. プロフィール作成（管理者）
     const{error:profErr}=await supabase.from("profiles").insert({id:userId,company_id:company.id,name:authForm.userName,email:authForm.email,role:"admin"});
-    if(profErr){setAuthError("プロフィールの作成に失敗しました: "+profErr.message);setAuthBusy(false);return;}
-    setAuthBusy(false);
+    if(profErr){setAuthError("プロフィールの作成に失敗しました: "+profErr.message);return;}
+    // 6. 登録処理が全部終わったので、ここで初めて画面にログイン状態を反映する
+    registeringRef.current=false;
+    setSession(signInData.session);
+    await loadProfile(userId);
+    }finally{
+      registeringRef.current=false;
+      setAuthBusy(false);
+    }
   }
 
   async function handleRegisterStaff(){
     if(!authForm.companyCode.trim()||!authForm.userName.trim()||!authForm.email.trim()||!authForm.password.trim()){setAuthError("すべての項目を入力してください");return;}
     if(authForm.password.length<6){setAuthError("パスワードは6文字以上にしてください");return;}
     setAuthBusy(true);setAuthError("");
+    registeringRef.current=true;
+    try{
     // 1. Auth ユーザー作成
     const{error:authErr}=await supabase.auth.signUp({email:authForm.email,password:authForm.password});
-    if(authErr&&authErr.message!=="User already registered"){setAuthError(authErr.message);setAuthBusy(false);return;}
+    if(authErr&&authErr.message!=="User already registered"){setAuthError(authErr.message);return;}
     // 2. サインインしてセッションを確立
     const{data:signInData,error:signInErr}=await supabase.auth.signInWithPassword({email:authForm.email,password:authForm.password});
-    if(signInErr){setAuthError("ログインに失敗しました。もう一度お試しください");setAuthBusy(false);return;}
+    if(signInErr){setAuthError("ログインに失敗しました。もう一度お試しください");return;}
     const userId=signInData.user.id;
     // 3. 会社コード確認
     const{data:company}=await supabase.from("companies").select("id").eq("id",authForm.companyCode.trim()).maybeSingle();
-    if(!company){setAuthError("会社コードが見つかりません。管理者に確認してください");setAuthBusy(false);return;}
+    if(!company){setAuthError("会社コードが見つかりません。管理者に確認してください");return;}
     // 4. 既存プロフィール確認
     const{data:existingProf}=await supabase.from("profiles").select("id").eq("id",userId).maybeSingle();
-    if(existingProf){setAuthError("このアカウントは既に登録済みです");setAuthBusy(false);return;}
+    if(existingProf){setAuthError("このアカウントは既に登録済みです");return;}
     // 5. プロフィール作成（スタッフ・承認待ち状態）
     const{error:profErr}=await supabase.from("profiles").insert({id:userId,company_id:company.id,name:authForm.userName,email:authForm.email,role:"staff",is_approved:false});
-    if(profErr){setAuthError("プロフィールの作成に失敗しました: "+profErr.message);setAuthBusy(false);return;}
-    // 承認されるまで使えないので、いったんサインアウトして案内を出す
+    if(profErr){setAuthError("プロフィールの作成に失敗しました: "+profErr.message);return;}
+    // 承認されるまで使えないので、セッションをここで完全に破棄してから案内を出す
     await supabase.auth.signOut();
+    setSession(null);setProfile(null);
     setAuthMode("login");
     setAuthError("登録が完了しました。管理者の承認をお待ちください。承認されるとログインできるようになります。");
-    setAuthBusy(false);
+    }finally{
+      registeringRef.current=false;
+      setAuthBusy(false);
+    }
   }
 
   async function handleLogout(){
@@ -485,7 +504,7 @@ export default function App(){
 
           {/* タブ切り替え */}
           <div style={{display:"flex",background:"#161B22",borderRadius:8,padding:4,marginBottom:20,border:"1px solid #30363D"}}>
-            {[["login","ログイン"],["register-admin","新規登録（管理者）"]].map(([m,l])=>(
+            {[["login","ログイン"],["register-admin","新規登録（管理者）"],["register-staff","新規登録（スタッフ）"]].map(([m,l])=>(
               <button key={m} style={{flex:1,padding:"8px 4px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:authMode===m?"#1F6FEB":"transparent",color:authMode===m?"#fff":"#8B949E",transition:"all .15s"}} onClick={()=>{setAuthMode(m);setAuthError("");}}>
                 {l}
               </button>
@@ -507,7 +526,7 @@ export default function App(){
             {authError&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#F85149"}}>{authError}</div>}
             {authMode==="register-admin"&&<div style={{background:"rgba(88,166,255,.1)",border:"1px solid rgba(88,166,255,.2)",borderRadius:6,padding:"8px 12px",fontSize:11,color:"#58A6FF"}}>登録後に「会社コード」が発行されます。スタッフへ共有するとチームで使えます。</div>}
             <button style={{...btnP,padding:"12px",fontSize:14,opacity:authBusy?0.6:1}} onClick={()=>{if(authMode==="login")handleLogin();else if(authMode==="register-admin")handleRegisterAdmin();else handleRegisterStaff();}} disabled={authBusy}>
-              {authBusy?"処理中…":authMode==="login"?"ログイン":"管理者として登録"}
+              {authBusy?"処理中…":authMode==="login"?"ログイン":authMode==="register-admin"?"管理者として登録":"スタッフとして登録"}
             </button>
           </div>
         </div>
@@ -808,6 +827,15 @@ export default function App(){
       {tab==="staff"&&isAdmin&&(
         <div style={{padding:16}}>
           <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>👥 スタッフ管理</div>
+
+          {/* 会社コード表示 */}
+          <div style={{background:"rgba(88,166,255,.08)",border:"1px solid rgba(88,166,255,.25)",borderRadius:8,padding:14,marginBottom:16}}>
+            <div style={{fontSize:11,color:"#8B949E",marginBottom:6}}>🔑 会社コード（スタッフの新規登録時に必要）</div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <code style={{flex:1,fontFamily:"monospace",fontSize:12,color:"#58A6FF",background:"#0D1117",padding:"8px 10px",borderRadius:6,overflowX:"auto",whiteSpace:"nowrap"}}>{profile.company_id}</code>
+              <button style={{...btnP,padding:"8px 14px",fontSize:12}} onClick={()=>{navigator.clipboard.writeText(profile.company_id);addToast("会社コードをコピーしました","ok");}}>コピー</button>
+            </div>
+          </div>
 
           {/* スタッフ追加フォーム */}
           <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16,marginBottom:16}}>
