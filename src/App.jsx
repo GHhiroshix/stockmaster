@@ -123,6 +123,7 @@ export default function App(){
   const[authError,setAuthError]=useState("");
   const[authBusy,setAuthBusy]=useState(false);
   const[staffList,setStaffList]=useState([]);
+  const[pendingAdmins,setPendingAdmins]=useState([]);
   const[locations,setLocations]=useState([]); // 在庫場所マスタ
   const[newLocation,setNewLocation]=useState("");
   const[staffForm,setStaffForm]=useState({name:"",email:"",password:""});
@@ -187,10 +188,10 @@ export default function App(){
 
   async function loadProfile(userId){
     const{data,error}=await supabase.from("profiles").select("*").eq("id",userId).maybeSingle();
-    if(data&&data.role==="staff"&&data.is_approved===false){
-      // 管理者の承認待ちのスタッフはログインさせない
+    if(data&&data.is_approved===false){
+      // 承認待ち（スタッフなら会社の管理者、管理者なら運営）はログインさせない
       await supabase.auth.signOut();
-      setAuthError("まだ管理者の承認が済んでいません。承認されるまでお待ちください。");
+      setAuthError(data.role==="admin"?"まだ運営の承認が済んでいません。承認されるまでお待ちください。":"まだ管理者の承認が済んでいません。承認されるまでお待ちください。");
       setAuthMode("login");
       setAuthLoading(false);
       return;
@@ -229,6 +230,19 @@ export default function App(){
     if(data) setStaffList(data);
   }
 
+  async function loadPendingAdmins(){
+    const res=await fetch("/api/list-pending-admins",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({requester_id:profile.id})});
+    const data=await res.json();
+    if(res.ok) setPendingAdmins(data.pending||[]);
+  }
+  async function reviewAdmin(userId,action){
+    if(action==="reject"&&!window.confirm("この会社を却下して削除しますか？"))return;
+    const res=await fetch("/api/review-admin",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({requester_id:profile.id,user_id:userId,action})});
+    const data=await res.json();
+    if(!res.ok){addToast(data.error||"エラーが発生しました","err");}
+    else{addToast(action==="approve"?"承認しました":"却下しました","ok");loadPendingAdmins();}
+  }
+
   // ── 認証 ──────────────────────────────────────────────
   async function handleLogin(){
     setAuthBusy(true);setAuthError("");
@@ -256,13 +270,14 @@ export default function App(){
     // 4. 会社作成
     const{data:company,error:compErr}=await supabase.from("companies").insert({name:authForm.companyName}).select().single();
     if(compErr){setAuthError("会社の作成に失敗しました: "+compErr.message);return;}
-    // 5. プロフィール作成（管理者）
-    const{error:profErr}=await supabase.from("profiles").insert({id:userId,company_id:company.id,name:authForm.userName,email:authForm.email,role:"admin"});
+    // 5. プロフィール作成（管理者・プラットフォーム管理者の承認待ち状態）
+    const{error:profErr}=await supabase.from("profiles").insert({id:userId,company_id:company.id,name:authForm.userName,email:authForm.email,role:"admin",is_approved:false});
     if(profErr){setAuthError("プロフィールの作成に失敗しました: "+profErr.message);return;}
-    // 6. 登録処理が全部終わったので、ここで初めて画面にログイン状態を反映する
-    registeringRef.current=false;
-    setSession(signInData.session);
-    await loadProfile(userId);
+    // 承認されるまで使えないので、セッションを完全に破棄してから案内を出す
+    await supabase.auth.signOut();
+    setSession(null);setProfile(null);
+    setAuthMode("login");
+    setAuthError("登録が完了しました。運営による審査をお待ちください。承認されるとログインできるようになります。");
     }finally{
       registeringRef.current=false;
       setAuthBusy(false);
@@ -564,8 +579,9 @@ export default function App(){
           ["incoming","📥 入庫履歴"],
           ["outgoing","📤 出庫履歴"],
           ...(isAdmin?[["dashboard","📊 分析"],["categories","🗂 カテゴリ登録"],["staff","👥 スタッフ管理"]]:[]),
+          ...(profile.is_platform_admin?[["platform","🛡 運営管理"]]:[]),
         ].map(it=>(
-          <div key={it[0]} style={{flexShrink:0,padding:"10px 12px",fontSize:13,fontWeight:500,color:tab===it[0]?"#58A6FF":"#8B949E",cursor:"pointer",borderBottom:tab===it[0]?"2px solid #58A6FF":"2px solid transparent"}} onClick={()=>{setTab(it[0]);if(it[0]==="staff")loadStaff(profile.company_id);}}>
+          <div key={it[0]} style={{flexShrink:0,padding:"10px 12px",fontSize:13,fontWeight:500,color:tab===it[0]?"#58A6FF":"#8B949E",cursor:"pointer",borderBottom:tab===it[0]?"2px solid #58A6FF":"2px solid transparent"}} onClick={()=>{setTab(it[0]);if(it[0]==="staff")loadStaff(profile.company_id);if(it[0]==="platform")loadPendingAdmins();}}>
             {it[1]}{it[0]==="inventory"&&alerts.length>0&&<span style={{marginLeft:4,background:"#F85149",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:9,fontWeight:700}}>{alerts.length}</span>}
           </div>
         ))}
@@ -574,7 +590,7 @@ export default function App(){
       {/* NAV - スマホ（現在のタブ表示） */}
       {isPhone&&<div style={{background:"#161B22",borderBottom:"1px solid #30363D",padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontSize:13,fontWeight:600,color:"#58A6FF"}}>
-          {{"scan":"📷 スキャン","inventory":"📦 在庫一覧","incoming":"📥 入庫履歴","outgoing":"📤 出庫履歴","dashboard":"📊 分析","categories":"🗂 カテゴリ登録","staff":"👥 スタッフ管理"}[tab]}
+          {{"scan":"📷 スキャン","inventory":"📦 在庫一覧","incoming":"📥 入庫履歴","outgoing":"📤 出庫履歴","dashboard":"📊 分析","categories":"🗂 カテゴリ登録","staff":"👥 スタッフ管理","platform":"🛡 運営管理"}[tab]}
         </div>
         <div style={{fontSize:11,color:"#484F58"}}>☰ メニューで切り替え</div>
       </div>}
@@ -589,9 +605,10 @@ export default function App(){
               ["incoming","📥","入庫履歴"],
               ["outgoing","📤","出庫履歴"],
               ...(isAdmin?[["dashboard","📊","分析"],["categories","🗂","カテゴリ登録"],["staff","👥","スタッフ管理"]]:[]),
+              ...(profile.is_platform_admin?[["platform","🛡","運営管理"]]:[]),
             ].map(it=>(
               <div key={it[0]} style={{display:"flex",alignItems:"center",gap:14,padding:"16px 20px",borderBottom:"1px solid #21262D",background:tab===it[0]?"rgba(88,166,255,.08)":"transparent",cursor:"pointer"}}
-                onClick={()=>{setTab(it[0]);if(it[0]==="staff")loadStaff(profile.company_id);setMenuOpen(false);}}>
+                onClick={()=>{setTab(it[0]);if(it[0]==="staff")loadStaff(profile.company_id);if(it[0]==="platform")loadPendingAdmins();setMenuOpen(false);}}>
                 <span style={{fontSize:22}}>{it[1]}</span>
                 <span style={{fontSize:16,fontWeight:tab===it[0]?700:400,color:tab===it[0]?"#58A6FF":"#E6EDF3"}}>{it[2]}</span>
                 {it[0]==="inventory"&&alerts.length>0&&<span style={{marginLeft:"auto",background:"#F85149",color:"#fff",fontSize:11,padding:"2px 8px",borderRadius:10,fontWeight:700}}>{alerts.length}</span>}
@@ -905,6 +922,29 @@ export default function App(){
                   if(!res.ok){addToast(data.error||"エラーが発生しました","err");}
                   else{addToast(s.name+"さんを削除しました","ok");loadStaff(profile.company_id);}
                 }}>削除</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 運営管理タブ（プラットフォーム管理者のみ） */}
+      {tab==="platform"&&profile.is_platform_admin&&(
+        <div style={{padding:16}}>
+          <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>🛡 運営管理（新規会社の承認）</div>
+          <div style={{fontSize:12,color:"#8B949E",marginBottom:16}}>新しく「新規登録（管理者）」で作られた会社の一覧です。承認するとその会社の管理者がログインできるようになります。</div>
+          {pendingAdmins.length===0?(
+            <div style={{padding:"40px 20px",textAlign:"center",color:"#484F58"}}>承認待ちの会社はありません</div>
+          ):pendingAdmins.map(p=>(
+            <div key={p.id} style={{background:"rgba(210,153,34,.08)",border:"1px solid rgba(210,153,34,.3)",borderRadius:8,padding:14,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:600}}>{p.companies?.name||"（会社名不明）"}</div>
+                <div style={{fontSize:12,color:"#8B949E"}}>{p.name}（{p.email}）</div>
+                <div style={{fontSize:10,color:"#484F58"}}>{p.created_at?.slice(0,10)}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <button style={{...btnP,background:"#238636",padding:"6px 14px",fontSize:12}} onClick={()=>reviewAdmin(p.id,"approve")}>✓ 承認する</button>
+                <button style={btnD} onClick={()=>reviewAdmin(p.id,"reject")}>却下</button>
               </div>
             </div>
           ))}
