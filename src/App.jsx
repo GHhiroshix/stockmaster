@@ -495,6 +495,12 @@ export default function App(){
 
           <div style={{background:"#161B22",borderRadius:10,border:"1px solid #30363D",padding:20,display:"flex",flexDirection:"column",gap:12}}>
             {authMode==="register-admin"&&(
+              <div style={{background:"rgba(210,153,34,.1)",border:"1px solid rgba(210,153,34,.3)",borderRadius:6,padding:"10px 12px",fontSize:12,color:"#D29922",lineHeight:1.6}}>
+                <div style={{marginBottom:4}}>📧 ここで入力する<b>メールアドレス・パスワードが、そのままログイン用のID・パスワード</b>になります。ご希望のものを入力してください。</div>
+                <div>⏳ 登録してもすぐには使えません。<b>運営の承認が完了するまで「承認待ち」状態</b>となり、承認後に初めてログインできるようになります。</div>
+              </div>
+            )}
+            {authMode==="register-admin"&&(
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>会社名・店舗名</div><input style={inpS} type="text" placeholder="例：清水商店" value={authForm.companyName} onChange={e=>setAuthForm(f=>({...f,companyName:e.target.value}))}/></div>
             )}
             {authMode!=="login"&&(
