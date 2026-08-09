@@ -3,6 +3,87 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { supabase } from "./supabase";
 
+// ── 利用規約・プライバシーポリシー ────────────────────
+const TERMS_TEXT = `利用規約
+
+第1条（適用）
+本規約は、StockMaster（以下「本サービス」）の利用に関する条件を、本サービスを利用する事業者（以下「利用者」）と運営者との間で定めるものです。利用者は、本サービスを利用することで本規約に同意したものとみなします。
+
+第2条（アカウント登録）
+1. 利用者は、真実かつ正確な情報を用いて登録申請を行うものとします。
+2. 新規登録された会社アカウントは、運営による承認が完了するまで利用できません。運営は、登録内容に不備・不正の疑いがある場合、承認を保留または拒否することがあります。
+3. 利用者（管理者）は、自社に所属するスタッフアカウントの追加・削除・管理について責任を負います。
+
+第3条（アカウントの管理）
+利用者は、自己の責任においてメールアドレス・パスワードを管理するものとし、第三者への譲渡・貸与・共有を禁止します。アカウントの管理不十分による損害について、運営は責任を負いません。
+
+第4条（禁止事項）
+利用者は、本サービスの利用にあたり、以下の行為を行ってはなりません。
+・法令または公序良俗に違反する行為
+・本サービスの運営を妨害する行為
+・虚偽の情報を登録する行為
+・他の利用者または第三者の権利を侵害する行為
+・不正アクセスその他本サービスのシステムに不正に干渉する行為
+
+第5条（データの取扱い）
+利用者が本サービスに登録した商品情報・在庫情報等のデータは、利用者の会社に帰属します。運営は、本サービスの提供・保守・改善の目的でのみ当該データにアクセスすることがあります。
+
+第6条（サービスの停止・変更）
+運営は、システムの保守、障害、その他運営上の理由により、利用者への事前の通知なく本サービスの全部または一部の提供を停止・変更することがあります。
+
+第7条（免責事項）
+1. 本サービスは現状有姿で提供されるものとし、運営は本サービスの完全性、正確性、有用性等について保証しません。
+2. 運営は、本サービスの利用または利用不能により利用者に生じた損害について、運営の故意または重過失による場合を除き、責任を負いません。
+
+第8条（利用停止・登録抹消）
+運営は、利用者が本規約に違反した場合、または長期間利用のない場合等、運営が必要と判断した場合、事前の通知なく当該利用者の利用を停止し、または登録を抹消することがあります。
+
+第9条（規約の変更）
+運営は、必要と判断した場合、本規約を変更できるものとします。変更後の規約は、本サービス上に表示した時点から効力を生じるものとします。
+
+第10条（準拠法・管轄）
+本規約の解釈にあたっては日本法を準拠法とし、本サービスに関して紛争が生じた場合には、運営の所在地を管轄する裁判所を専属的合意管轄とします。
+
+（本規約は一般的なひな形であり、実際の運用にあたっては内容の見直しをご検討ください）`;
+
+const PRIVACY_TEXT = `プライバシーポリシー
+
+StockMaster（以下「本サービス」）は、利用者の情報を以下の方針に基づき取り扱います。
+
+1. 取得する情報
+・アカウント登録時に入力される氏名、メールアドレス、会社名等
+・本サービスの利用にともない登録される商品情報、在庫情報、入出庫履歴等の業務データ
+・アクセスログ、利用状況等の技術的情報
+
+2. 利用目的
+・本サービスの提供、維持、改善のため
+・利用者からの問い合わせへの対応のため
+・不正利用の防止、セキュリティ確保のため
+・利用規約に基づく審査（新規会社登録の承認等）のため
+
+3. 第三者提供
+運営は、法令に基づく場合を除き、あらかじめ利用者の同意を得ることなく、取得した情報を第三者に提供しません。
+
+4. 業務委託先への提供
+本サービスは、データの保管・処理のためにクラウドサービス事業者（Supabase、Vercel等）を利用しています。これらの事業者に対しては、業務の遂行に必要な範囲でのみ情報を提供します。
+
+5. データの保管期間
+利用者のデータは、アカウントの利用期間中保管されます。退会・アカウント削除後は、法令上保管が必要な場合を除き、合理的な期間内に削除します。
+
+6. 安全管理措置
+運営は、取得した情報の漏洩、滅失又は毀損の防止その他の安全管理のために必要かつ適切な措置を講じます。
+
+7. 開示・訂正・削除の請求
+利用者は、自己の情報について、開示・訂正・削除等を求めることができます。ご希望の場合は、運営までお問い合わせください。
+
+8. Cookie等の利用
+本サービスは、ログイン状態の維持等のためにCookieや類似の技術を利用することがあります。
+
+9. プライバシーポリシーの変更
+運営は、必要に応じて本ポリシーの内容を変更することがあります。変更後の内容は、本サービス上に表示した時点から効力を生じるものとします。
+
+（本ポリシーは一般的なひな形であり、実際の運用にあたっては内容の見直しをご検討ください）`;
+
 // ── カテゴリー初期データ ──────────────────────────────
 const CATS_INITIAL = [
   { id:"c1", name:"介護用品", emoji:"🏥", children:[
@@ -124,6 +205,7 @@ export default function App(){
   const[authBusy,setAuthBusy]=useState(false);
   const[staffList,setStaffList]=useState([]);
   const[pendingAdmins,setPendingAdmins]=useState([]);
+  const[legalModal,setLegalModal]=useState(null); // "terms" | "privacy" | null
   const[locations,setLocations]=useState([]); // 在庫場所マスタ
   const[newLocation,setNewLocation]=useState("");
   const[staffForm,setStaffForm]=useState({name:"",email:"",password:""});
@@ -514,7 +596,27 @@ export default function App(){
               {authBusy?"処理中…":authMode==="login"?"ログイン":"管理者として登録"}
             </button>
           </div>
+
+          {/* フッター：利用規約・プライバシーポリシー */}
+          <div style={{textAlign:"center",marginTop:20,fontSize:11,color:"#484F58"}}>
+            <span style={{cursor:"pointer",textDecoration:"underline"}} onClick={()=>setLegalModal("terms")}>利用規約</span>
+            <span style={{margin:"0 8px"}}>・</span>
+            <span style={{cursor:"pointer",textDecoration:"underline"}} onClick={()=>setLegalModal("privacy")}>プライバシーポリシー</span>
+          </div>
         </div>
+
+        {/* 利用規約・プライバシーポリシー モーダル */}
+        {legalModal&&(
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16}} onClick={()=>setLegalModal(null)}>
+            <div style={{background:"#161B22",border:"1px solid #30363D",borderRadius:10,maxWidth:600,width:"100%",maxHeight:"80vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()}>
+              <div style={{padding:"14px 18px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{fontWeight:700,fontSize:15}}>{legalModal==="terms"?"利用規約":"プライバシーポリシー"}</div>
+                <button style={{background:"transparent",border:"none",color:"#8B949E",fontSize:20,cursor:"pointer",lineHeight:1}} onClick={()=>setLegalModal(null)}>×</button>
+              </div>
+              <div style={{padding:18,overflowY:"auto",fontSize:12,color:"#C9D1D9",whiteSpace:"pre-wrap",lineHeight:1.8}}>{legalModal==="terms"?TERMS_TEXT:PRIVACY_TEXT}</div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
