@@ -280,7 +280,8 @@ export default function App(){
     if(error){
       // 通信エラーなど「取得に失敗した」場合は、アカウントが無いと決めつけずログイン画面に戻すだけにする
       // （以前はここでサインアウトして「再登録してください」と誤案内していた）
-      setAuthError("データの読み込みに失敗しました。通信状況をご確認のうえ、もう一度ログインしてください。");
+      // 原因調査のため、一時的にエラーの詳細も表示する
+      setAuthError("データの読み込みに失敗しました。もう一度ログインしてください。[詳細: "+(error.message||error.code||JSON.stringify(error))+"]");
       setAuthMode("login");
       setAuthLoading(false);
       return;
