@@ -3,14 +3,28 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+// 呼び出した人が「本当にログイン中の運営（プラットフォーム管理者）本人」かどうかをサーバー側で確認する
+async function getVerifiedPlatformAdmin(req, supabaseAdmin) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return null;
+
+  const { data: userData, error: userErr } = await supabaseAdmin.auth.getUser(token);
+  if (userErr || !userData?.user) return null;
+
+  const { data: profile } = await supabaseAdmin
+    .from('profiles')
+    .select('*')
+    .eq('id', userData.user.id)
+    .single();
+
+  if (!profile || !profile.is_platform_admin) return null;
+  return profile;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const { requester_id } = req.body;
-  if (!requester_id) {
-    return res.status(400).json({ error: '必須項目が不足しています' });
   }
 
   const supabaseAdmin = createClient(
@@ -18,14 +32,9 @@ export default async function handler(req, res) {
     process.env.SUPABASE_SERVICE_ROLE_KEY
   );
 
-  // 依頼者がプラットフォーム管理者か確認
-  const { data: requester } = await supabaseAdmin
-    .from('profiles')
-    .select('is_platform_admin')
-    .eq('id', requester_id)
-    .single();
-
-  if (!requester || !requester.is_platform_admin) {
+  // ログイン中の本人確認。運営（プラットフォーム管理者）本人でなければ処理しない
+  const requester = await getVerifiedPlatformAdmin(req, supabaseAdmin);
+  if (!requester) {
     return res.status(403).json({ error: '権限がありません' });
   }
 

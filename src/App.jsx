@@ -143,6 +143,13 @@ function dl(content,filename){const blob=new Blob([content],{type:"text/csv;char
 function prodFromDB(r){return{id:r.id,jan:r.jan,name:r.name,price:r.price,cost:r.cost,qty:r.qty,reorderPoint:r.reorder_point,catL1:r.cat_l1||"",catL2:r.cat_l2||"",catL3:r.cat_l3||"",maker:r.maker||"",supplier:r.supplier||"",location:r.location||"",addedAt:r.added_at,imageUrl:r.image_url||""};}
 // 画像を自前サーバー経由で取得することで、外部サイトのホットリンク対策を回避する
 function proxyImg(url){if(!url)return"";return"/api/image-proxy?url="+encodeURIComponent(url);}
+
+// 管理用API（スタッフ追加/削除、運営の承認など）を呼ぶときに付ける「本人確認の印」
+// ログイン中の人が本当に自分自身かどうかを、サーバー側でSupabaseに確認してもらうための仕組み
+async function authHeaders(){
+  const{data:{session}}=await supabase.auth.getSession();
+  return session?.access_token?{Authorization:"Bearer "+session.access_token}:{};
+}
 function prodToDB(i,cid){return{company_id:cid,jan:i.jan,name:i.name,price:i.price||0,cost:i.cost||0,qty:i.qty||0,reorder_point:i.reorderPoint||5,cat_l1:i.catL1||"",cat_l2:i.catL2||"",cat_l3:i.catL3||"",maker:i.maker||"",supplier:i.supplier||"",added_at:i.addedAt||today(),location:i.location||"",image_url:i.imageUrl||""};}
 function incFromDB(r){return{id:r.id,date:r.date,jan:r.jan,name:r.name,qty:r.qty,cost:r.cost,totalCost:r.total_cost,maker:r.maker||"",supplier:r.supplier||"",note:r.note||""};}
 function incToDB(r,cid){return{company_id:cid,date:r.date,jan:r.jan,name:r.name,qty:r.qty,cost:r.cost||0,total_cost:r.totalCost||0,maker:r.maker||"",supplier:r.supplier||"",note:r.note||""};}
@@ -313,13 +320,13 @@ export default function App(){
   }
 
   async function loadPendingAdmins(){
-    const res=await fetch("/api/list-pending-admins",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({requester_id:profile.id})});
+    const res=await fetch("/api/list-pending-admins",{method:"POST",headers:{"Content-Type":"application/json",...(await authHeaders())},body:JSON.stringify({})});
     const data=await res.json();
     if(res.ok) setPendingAdmins(data.pending||[]);
   }
   async function reviewAdmin(userId,action){
     if(action==="reject"&&!window.confirm("この会社を却下して削除しますか？"))return;
-    const res=await fetch("/api/review-admin",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({requester_id:profile.id,user_id:userId,action})});
+    const res=await fetch("/api/review-admin",{method:"POST",headers:{"Content-Type":"application/json",...(await authHeaders())},body:JSON.stringify({user_id:userId,action})});
     const data=await res.json();
     if(!res.ok){addToast(data.error||"エラーが発生しました","err");}
     else{addToast(action==="approve"?"承認しました":"却下しました","ok");loadPendingAdmins();}
@@ -930,7 +937,7 @@ export default function App(){
                 if(!staffForm.name||!staffForm.email||!staffForm.password){setStaffError("すべて入力してください");return;}
                 if(staffForm.password.length<6){setStaffError("パスワードは6文字以上");return;}
                 setStaffBusy(true);setStaffError("");setStaffSuccess("");
-                const res=await fetch("/api/create-staff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:staffForm.name,email:staffForm.email,password:staffForm.password,company_id:profile.company_id})});
+                const res=await fetch("/api/create-staff",{method:"POST",headers:{"Content-Type":"application/json",...(await authHeaders())},body:JSON.stringify({name:staffForm.name,email:staffForm.email,password:staffForm.password,company_id:profile.company_id})});
                 const data=await res.json();
                 if(!res.ok){setStaffError(data.error||"エラーが発生しました");}
                 else{setStaffSuccess(staffForm.name+"さんを追加しました！");setStaffForm({name:"",email:"",password:""});loadStaff(profile.company_id);}
@@ -951,7 +958,7 @@ export default function App(){
                 <span style={{background:s.role==="admin"?"rgba(63,185,80,.12)":"rgba(88,166,255,.12)",color:s.role==="admin"?"#3FB950":"#58A6FF",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600}}>{s.role==="admin"?"👑 管理者":"👤 スタッフ"}</span>
                 {s.id!==profile.id&&<button style={btnD} onClick={async()=>{
                   if(!window.confirm(s.name+"さんを削除しますか？"))return;
-                  const res=await fetch("/api/delete-staff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:s.id,company_id:profile.company_id,requester_id:profile.id})});
+                  const res=await fetch("/api/delete-staff",{method:"POST",headers:{"Content-Type":"application/json",...(await authHeaders())},body:JSON.stringify({user_id:s.id,company_id:profile.company_id})});
                   const data=await res.json();
                   if(!res.ok){addToast(data.error||"エラーが発生しました","err");}
                   else{addToast(s.name+"さんを削除しました","ok");loadStaff(profile.company_id);}
