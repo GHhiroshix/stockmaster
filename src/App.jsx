@@ -277,6 +277,14 @@ export default function App(){
 
   async function loadProfile(userId){
     const{data,error}=await supabase.from("profiles").select("*").eq("id",userId).maybeSingle();
+    if(error){
+      // 通信エラーなど「取得に失敗した」場合は、アカウントが無いと決めつけずログイン画面に戻すだけにする
+      // （以前はここでサインアウトして「再登録してください」と誤案内していた）
+      setAuthError("データの読み込みに失敗しました。通信状況をご確認のうえ、もう一度ログインしてください。");
+      setAuthMode("login");
+      setAuthLoading(false);
+      return;
+    }
     if(data&&data.is_approved===false){
       // 承認待ち（スタッフなら会社の管理者、管理者なら運営）はログインさせない
       await supabase.auth.signOut();
@@ -289,7 +297,7 @@ export default function App(){
       setProfile(data);
       await loadData(data.company_id);
     } else {
-      // プロフィールなし→サインアウトしてエラー表示
+      // 本当にプロフィールが存在しない場合のみ、サインアウトして登録を案内する
       await supabase.auth.signOut();
       setAuthError("アカウント登録が完了していません。もう一度新規登録してください");
       setAuthMode("register-admin");
