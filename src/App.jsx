@@ -216,6 +216,10 @@ export default function App(){
   const[locations,setLocations]=useState([]); // 在庫場所マスタ
   const[newLocation,setNewLocation]=useState("");
   const[staffForm,setStaffForm]=useState({name:"",email:"",password:""});
+  const[pwForm,setPwForm]=useState({current:"",newPw:"",confirm:""});
+  const[pwBusy,setPwBusy]=useState(false);
+  const[pwError,setPwError]=useState("");
+  const[pwSuccess,setPwSuccess]=useState("");
   const[staffBusy,setStaffBusy]=useState(false);
   const[staffError,setStaffError]=useState("");
   const[staffSuccess,setStaffSuccess]=useState("");
@@ -385,6 +389,22 @@ export default function App(){
   async function handleLogout(){
     await supabase.auth.signOut();
     setProfile(null);setDb([]);setIncoming([]);setOutgoing([]);setCats(CATS_INITIAL);setTab("scan");
+  }
+
+  async function handleChangePassword(){
+    if(!pwForm.current||!pwForm.newPw||!pwForm.confirm){setPwError("すべて入力してください");return;}
+    if(pwForm.newPw.length<6){setPwError("パスワードは6文字以上にしてください");return;}
+    if(pwForm.newPw!==pwForm.confirm){setPwError("新しいパスワードが一致しません");return;}
+    if(pwForm.newPw===pwForm.current){setPwError("新しいパスワードは現在のものと違うものを入力してください");return;}
+    setPwBusy(true);setPwError("");setPwSuccess("");
+    // 現在のパスワードで再認証する。updateUserだけでは現在のパスワードを確認しないため、
+    // 放置されたセッションから勝手に変えられるのを防ぐ。
+    const{error:reauthErr}=await supabase.auth.signInWithPassword({email:profile.email,password:pwForm.current});
+    if(reauthErr){setPwError("現在のパスワードが違います");setPwBusy(false);return;}
+    const{error}=await supabase.auth.updateUser({password:pwForm.newPw});
+    if(error){setPwError("変更に失敗しました: "+error.message);}
+    else{setPwSuccess("パスワードを変更しました。他の端末では新しいパスワードでログインし直してください。");setPwForm({current:"",newPw:"",confirm:""});}
+    setPwBusy(false);
   }
 
   // ── カテゴリー変更時に自動保存 ─────────────────────────
@@ -666,6 +686,7 @@ export default function App(){
           ["inventory","📦 在庫一覧"],
           ["incoming","📥 入庫履歴"],
           ["outgoing","📤 出庫履歴"],
+          ["account","🔑 パスワード変更"],
           ...(isAdmin?[["dashboard","📊 分析"],["categories","🗂 カテゴリ登録"],["staff","👥 スタッフ管理"]]:[]),
           ...(profile.is_platform_admin?[["platform","🛡 運営管理"]]:[]),
         ].map(it=>(
@@ -678,7 +699,7 @@ export default function App(){
       {/* NAV - スマホ（現在のタブ表示） */}
       {isPhone&&<div style={{background:"#161B22",borderBottom:"1px solid #30363D",padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontSize:13,fontWeight:600,color:"#58A6FF"}}>
-          {{"scan":"📷 スキャン","inventory":"📦 在庫一覧","incoming":"📥 入庫履歴","outgoing":"📤 出庫履歴","dashboard":"📊 分析","categories":"🗂 カテゴリ登録","staff":"👥 スタッフ管理","platform":"🛡 運営管理"}[tab]}
+          {{"scan":"📷 スキャン","inventory":"📦 在庫一覧","incoming":"📥 入庫履歴","outgoing":"📤 出庫履歴","account":"🔑 パスワード変更","dashboard":"📊 分析","categories":"🗂 カテゴリ登録","staff":"👥 スタッフ管理","platform":"🛡 運営管理"}[tab]}
         </div>
         <div style={{fontSize:11,color:"#484F58"}}>☰ メニューで切り替え</div>
       </div>}
@@ -692,6 +713,7 @@ export default function App(){
               ["inventory","📦","在庫一覧"],
               ["incoming","📥","入庫履歴"],
               ["outgoing","📤","出庫履歴"],
+              ["account","🔑","パスワード変更"],
               ...(isAdmin?[["dashboard","📊","分析"],["categories","🗂","カテゴリ登録"],["staff","👥","スタッフ管理"]]:[]),
               ...(profile.is_platform_admin?[["platform","🛡","運営管理"]]:[]),
             ].map(it=>(
@@ -925,6 +947,24 @@ export default function App(){
               ))}</div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* パスワード変更タブ（全ロール） */}
+      {tab==="account"&&(
+        <div style={{padding:16,maxWidth:520,margin:"0 auto",width:"100%"}}>
+          <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>🔑 パスワード変更</div>
+          <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:16}}>
+            <div style={{fontSize:11,color:"#8B949E",marginBottom:12}}>ログイン中のアカウント（{profile.email}）のパスワードを変更します。</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>現在のパスワード</div><input style={inpS} type="password" value={pwForm.current} onChange={e=>setPwForm(f=>({...f,current:e.target.value}))}/></div>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>新しいパスワード（6文字以上）</div><input style={inpS} type="password" value={pwForm.newPw} onChange={e=>setPwForm(f=>({...f,newPw:e.target.value}))}/></div>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>新しいパスワード（確認）</div><input style={inpS} type="password" value={pwForm.confirm} onChange={e=>setPwForm(f=>({...f,confirm:e.target.value}))}/></div>
+              {pwError&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#F85149"}}>{pwError}</div>}
+              {pwSuccess&&<div style={{background:"rgba(63,185,80,.1)",border:"1px solid rgba(63,185,80,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#3FB950"}}>{pwSuccess}</div>}
+              <button style={{...btnP,background:"#238636",opacity:pwBusy?0.6:1}} disabled={pwBusy} onClick={handleChangePassword}>{pwBusy?"処理中…":"パスワードを変更する"}</button>
+            </div>
+          </div>
         </div>
       )}
 
