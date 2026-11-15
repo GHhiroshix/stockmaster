@@ -484,8 +484,8 @@ export default function App(){
     }else{
       if(!existing){addToast("未登録商品は出庫できません","err");return;}
       const sp=parseInt(arSellPrice)||existing.price||0;
-      if(existing.qty<arQty){if(!window.confirm("在庫が不足しています（現在"+existing.qty+"個）。このまま出庫しますか？"))return;}
-      const{error}=await supabase.from("products").update({qty:Math.max(0,existing.qty-arQty)}).eq("id",existing.id);
+      if(existing.qty<arQty){addToast("在庫が不足しています（現在"+existing.qty+"個）。出庫数量を"+existing.qty+"個以下にしてください","err");return;}
+      const{error}=await supabase.from("products").update({qty:existing.qty-arQty}).eq("id",existing.id);
       if(error){addToast("エラーが発生しました","err");return;}
       setDb(d=>d.map(i=>i.id===existing.id?{...i,qty:Math.max(0,i.qty-arQty)}:i));
       const{data}=await supabase.from("outgoing").insert(outToDB({date:today(),jan:product.jan,name:product.name,qty:arQty,price:sp,totalPrice:arQty*sp,destination:arDestination,note:""},profile.company_id)).select().single();
@@ -517,8 +517,8 @@ export default function App(){
   async function confirmAddOutgoing(){
     if(!outgoingModal||!profile)return;if(!outgoingModal.name.trim()){addToast("商品名を入力してください","err");return;}if(!outgoingModal.qty||outgoingModal.qty<1){addToast("出庫数量を入力してください","err");return;}
     const item=db.find(i=>i.jan===outgoingModal.jan);
-    if(item&&item.qty<outgoingModal.qty){if(!window.confirm("在庫が不足しています（現在"+item.qty+"個）。このまま出庫しますか？"))return;}
-    if(item){const newQty=Math.max(0,item.qty-outgoingModal.qty);await supabase.from("products").update({qty:newQty}).eq("id",item.id);setDb(d=>d.map(i=>i.id===item.id?{...i,qty:newQty}:i));}
+    if(item&&item.qty<outgoingModal.qty){addToast("在庫が不足しています（現在"+item.qty+"個）。出庫数量を"+item.qty+"個以下にしてください","err");return;}
+    if(item){const newQty=item.qty-outgoingModal.qty;await supabase.from("products").update({qty:newQty}).eq("id",item.id);setDb(d=>d.map(i=>i.id===item.id?{...i,qty:newQty}:i));}
     const rec={date:outgoingModal.date,jan:outgoingModal.jan,name:outgoingModal.name,qty:outgoingModal.qty,price:outgoingModal.price,totalPrice:outgoingModal.qty*outgoingModal.price,destination:outgoingModal.destination,note:outgoingModal.note};
     const{data,error}=await supabase.from("outgoing").insert(outToDB(rec,profile.company_id)).select().single();
     if(error){addToast("エラーが発生しました","err");return;}
