@@ -467,28 +467,29 @@ export default function App(){
     if(!modal||!profile)return;const{product,isNew,existing}=modal;
     if(arMode==="incoming"){
       const cost=parseInt(arCost)||0;
+      const c=cost||existing?.cost||0;
       if(isNew){
         const{data,error}=await supabase.from("products").insert(prodToDB({...product,cost,qty:arQty,reorderPoint:5,catL1:arL1,catL2:arL2,catL3:arL3,maker:arMaker,supplier:arSupplier,addedAt:today()},profile.company_id)).select().single();
         if(error){addToast("エラーが発生しました","err");return;}
         setDb(d=>[prodFromDB(data),...d]);addToast("新規登録＋入庫 ("+arQty+"個)","ok");
+        if(c>0){const{data:incData}=await supabase.from("incoming").insert(incToDB({date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,totalCost:arQty*c,maker:arMaker||existing?.maker||"",supplier:arSupplier||existing?.supplier||"",note:""},profile.company_id)).select().single();if(incData)setIncoming(h=>[incFromDB(incData),...h]);}
       }else{
-        const newQty=existing.qty+arQty;
-        const{error}=await supabase.from("products").update({qty:newQty,cost:cost||existing.cost||0,cat_l1:arL1||existing.catL1,cat_l2:arL2||existing.catL2,cat_l3:arL3||existing.catL3,maker:arMaker||existing.maker,supplier:arSupplier||existing.supplier}).eq("id",existing.id);
+        const incRec=c>0?{date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,total_cost:arQty*c,maker:arMaker||existing.maker||"",supplier:arSupplier||existing.supplier||"",note:""}:null;
+        const{data,error}=await supabase.rpc("sm_receive_stock",{p_product_id:existing.id,p_qty:arQty,p_attrs:{cost:cost||existing.cost||0,cat_l1:arL1||existing.catL1,cat_l2:arL2||existing.catL2,cat_l3:arL3||existing.catL3,maker:arMaker||existing.maker,supplier:arSupplier||existing.supplier},p_incoming:incRec});
         if(error){addToast("エラーが発生しました","err");return;}
+        const newQty=data.new_qty;
         setDb(d=>d.map(i=>i.id===existing.id?{...i,qty:newQty,cost:cost||i.cost,catL1:arL1||i.catL1,catL2:arL2||i.catL2,catL3:arL3||i.catL3,maker:arMaker||i.maker,supplier:arSupplier||i.supplier}:i));
+        if(data.incoming)setIncoming(h=>[incFromDB(data.incoming),...h]);
         addToast("入庫 +"+arQty+"個 (計"+newQty+"個)","ok");
       }
-      const c=cost||existing?.cost||0;
-      if(c>0){const{data}=await supabase.from("incoming").insert(incToDB({date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,totalCost:arQty*c,maker:arMaker||existing?.maker||"",supplier:arSupplier||existing?.supplier||"",note:""},profile.company_id)).select().single();if(data)setIncoming(h=>[incFromDB(data),...h]);}
     }else{
       if(!existing){addToast("未登録商品は出庫できません","err");return;}
       const sp=parseInt(arSellPrice)||existing.price||0;
       if(existing.qty<arQty){addToast("在庫が不足しています（現在"+existing.qty+"個）。出庫数量を"+existing.qty+"個以下にしてください","err");return;}
-      const{error}=await supabase.from("products").update({qty:existing.qty-arQty}).eq("id",existing.id);
-      if(error){addToast("エラーが発生しました","err");return;}
-      setDb(d=>d.map(i=>i.id===existing.id?{...i,qty:Math.max(0,i.qty-arQty)}:i));
-      const{data}=await supabase.from("outgoing").insert(outToDB({date:today(),jan:product.jan,name:product.name,qty:arQty,price:sp,totalPrice:arQty*sp,destination:arDestination,note:""},profile.company_id)).select().single();
-      if(data)setOutgoing(o=>[outFromDB(data),...o]);
+      const{data,error}=await supabase.rpc("sm_issue_stock",{p_product_id:existing.id,p_qty:arQty,p_outgoing:{date:today(),jan:product.jan,name:product.name,qty:arQty,price:sp,total_price:arQty*sp,destination:arDestination,note:""}});
+      if(error){if(error.code==="SM001"){addToast("在庫が不足しています（現在"+existing.qty+"個）。出庫数量を"+existing.qty+"個以下にしてください","err");}else{addToast("エラーが発生しました","err");}return;}
+      setDb(d=>d.map(i=>i.id===existing.id?{...i,qty:data.new_qty}:i));
+      if(data.outgoing)setOutgoing(o=>[outFromDB(data.outgoing),...o]);
       addToast("出庫 -"+arQty+"個","ok");
     }
     setModal(null);
@@ -505,10 +506,10 @@ export default function App(){
   async function confirmAddIncoming(){
     if(!incomingModal||!profile)return;if(!incomingModal.name.trim()){addToast("商品名を入力してください","err");return;}
     const rec={...incomingModal,totalCost:(incomingModal.qty||0)*(incomingModal.cost||0)};
-    const{data,error}=await supabase.from("incoming").insert(incToDB(rec,profile.company_id)).select().single();
+    const{data,error}=await supabase.rpc("sm_receive_stock_by_jan",{p_jan:rec.jan||"",p_qty:rec.qty||0,p_incoming:{date:rec.date,jan:rec.jan||"",name:rec.name,qty:rec.qty||0,cost:rec.cost||0,total_cost:rec.totalCost||0,maker:rec.maker||"",supplier:rec.supplier||"",note:rec.note||""}});
     if(error){addToast("エラーが発生しました","err");return;}
-    setIncoming(h=>[incFromDB(data),...h]);
-    if(incomingModal.jan){const{data:prod}=await supabase.from("products").select("qty").eq("company_id",profile.company_id).eq("jan",incomingModal.jan).single();if(prod){const newQty=prod.qty+(incomingModal.qty||0);await supabase.from("products").update({qty:newQty}).eq("company_id",profile.company_id).eq("jan",incomingModal.jan);setDb(d=>d.map(i=>i.jan===incomingModal.jan?{...i,qty:newQty}:i));}}
+    setIncoming(h=>[incFromDB(data.incoming),...h]);
+    if(data.product_id!=null)setDb(d=>d.map(i=>i.id===data.product_id?{...i,qty:data.new_qty}:i));
     setIncomingModal(null);addToast("入庫履歴を追加（在庫+"+incomingModal.qty+"個）","ok");
   }
 
@@ -517,17 +518,27 @@ export default function App(){
     if(!outgoingModal||!profile)return;if(!outgoingModal.name.trim()){addToast("商品名を入力してください","err");return;}if(!outgoingModal.qty||outgoingModal.qty<1){addToast("出庫数量を入力してください","err");return;}
     const item=db.find(i=>i.jan===outgoingModal.jan);
     if(item&&item.qty<outgoingModal.qty){addToast("在庫が不足しています（現在"+item.qty+"個）。出庫数量を"+item.qty+"個以下にしてください","err");return;}
-    if(item){const newQty=item.qty-outgoingModal.qty;await supabase.from("products").update({qty:newQty}).eq("id",item.id);setDb(d=>d.map(i=>i.id===item.id?{...i,qty:newQty}:i));}
     const rec={date:outgoingModal.date,jan:outgoingModal.jan,name:outgoingModal.name,qty:outgoingModal.qty,price:outgoingModal.price,totalPrice:outgoingModal.qty*outgoingModal.price,destination:outgoingModal.destination,note:outgoingModal.note};
-    const{data,error}=await supabase.from("outgoing").insert(outToDB(rec,profile.company_id)).select().single();
-    if(error){addToast("エラーが発生しました","err");return;}
-    setOutgoing(o=>[outFromDB(data),...o]);setOutgoingModal(null);addToast("出庫を記録（在庫-"+outgoingModal.qty+"個）","ok");
+    if(item){
+      const{data,error}=await supabase.rpc("sm_issue_stock",{p_product_id:item.id,p_qty:outgoingModal.qty,p_outgoing:{date:rec.date,jan:rec.jan,name:rec.name,qty:rec.qty,price:rec.price||0,total_price:rec.totalPrice||0,destination:rec.destination||"",note:rec.note||""}});
+      if(error){if(error.code==="SM001"){addToast("在庫が不足しています（現在"+item.qty+"個）。出庫数量を"+item.qty+"個以下にしてください","err");}else{addToast("エラーが発生しました","err");}return;}
+      setDb(d=>d.map(i=>i.id===item.id?{...i,qty:data.new_qty}:i));
+      if(data.outgoing)setOutgoing(o=>[outFromDB(data.outgoing),...o]);
+    }else{
+      const{data,error}=await supabase.from("outgoing").insert(outToDB(rec,profile.company_id)).select().single();
+      if(error){addToast("エラーが発生しました","err");return;}
+      setOutgoing(o=>[outFromDB(data),...o]);
+    }
+    setOutgoingModal(null);addToast("出庫を記録（在庫-"+outgoingModal.qty+"個）","ok");
   }
 
   async function saveEditModal(){
     if(!editModal||!profile)return;
-    const{error}=await supabase.from("products").update(prodToDB(editModal,profile.company_id)).eq("id",editModal.id);
+    const dbObj=prodToDB(editModal,profile.company_id);const qtyVal=dbObj.qty;delete dbObj.qty;
+    const{error}=await supabase.from("products").update(dbObj).eq("id",editModal.id);
     if(error){addToast("エラーが発生しました","err");return;}
+    const{error:qtyError}=await supabase.rpc("sm_set_qty",{p_product_id:editModal.id,p_qty:qtyVal});
+    if(qtyError){addToast("エラーが発生しました","err");return;}
     setDb(d=>d.map(i=>i.id===editModal.id?editModal:i));setEditModal(null);addToast("保存しました","ok");
   }
 
@@ -535,7 +546,8 @@ export default function App(){
     const isNum=["price","cost","qty","reorderPoint"].includes(field);
     const numVal=isNum?Number(val)||0:val;
     const colMap={price:"price",cost:"cost",qty:"qty",reorderPoint:"reorder_point",name:"name",jan:"jan",maker:"maker",supplier:"supplier",location:"location"};
-    await supabase.from("products").update({[colMap[field]||field]:numVal}).eq("id",id);
+    if(field==="qty"){await supabase.rpc("sm_set_qty",{p_product_id:id,p_qty:numVal});}
+    else{await supabase.from("products").update({[colMap[field]||field]:numVal}).eq("id",id);}
     setDb(d=>d.map(i=>i.id!==id?i:{...i,[field]:numVal}));setEditItem(null);
   }
 
@@ -544,13 +556,13 @@ export default function App(){
     setDb(d=>d.filter(i=>i.id!==id));addToast("削除しました","info");
   }
   async function deleteIncoming(h){
-    await supabase.from("incoming").delete().eq("id",h.id);
-    if(h.jan){const ex=db.find(i=>i.jan===h.jan);if(ex){const newQty=Math.max(0,ex.qty-(h.qty||0));await supabase.from("products").update({qty:newQty}).eq("id",ex.id);setDb(d=>d.map(i=>i.id===ex.id?{...i,qty:newQty}:i));}}
+    const{data}=await supabase.rpc("sm_delete_incoming",{p_id:h.id});
+    if(data&&data.product_id!=null)setDb(d=>d.map(i=>i.id===data.product_id?{...i,qty:data.new_qty}:i));
     setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました","info");
   }
   async function deleteOutgoing(o){
-    await supabase.from("outgoing").delete().eq("id",o.id);
-    if(o.jan){const ex=db.find(i=>i.jan===o.jan);if(ex){const newQty=ex.qty+(o.qty||0);await supabase.from("products").update({qty:newQty}).eq("id",ex.id);setDb(d=>d.map(i=>i.id===ex.id?{...i,qty:newQty}:i));}}
+    const{data}=await supabase.rpc("sm_delete_outgoing",{p_id:o.id});
+    if(data&&data.product_id!=null)setDb(d=>d.map(i=>i.id===data.product_id?{...i,qty:data.new_qty}:i));
     setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました","info");
   }
 
