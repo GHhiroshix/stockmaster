@@ -242,6 +242,10 @@ export default function App(){
   const[legalModal,setLegalModal]=useState(null); // "terms" | "privacy" | null
   const[locations,setLocations]=useState([]); // 在庫場所マスタ
   const[newLocation,setNewLocation]=useState("");
+  const[makers,setMakers]=useState([]); // メーカーマスタ
+  const[newMaker,setNewMaker]=useState("");
+  const[suppliers,setSuppliers]=useState([]); // 仕入先マスタ
+  const[newSupplier,setNewSupplier]=useState("");
   const[staffForm,setStaffForm]=useState({name:"",email:"",password:""});
   const[pwForm,setPwForm]=useState({current:"",newPw:"",confirm:""});
   const[pwBusy,setPwBusy]=useState(false);
@@ -338,18 +342,38 @@ export default function App(){
 
   async function loadData(companyId){
     setDataLoading(true);
-    const[prods,inc,out,catsRow,locsRow]=await Promise.all([
+    const[prods,inc,out,catsRow,locsRow,makersRow,suppliersRow]=await Promise.all([
       supabase.from("products").select("*").eq("company_id",companyId).order("created_at",{ascending:false}),
       supabase.from("incoming").select("*").eq("company_id",companyId).order("date",{ascending:false}),
       supabase.from("outgoing").select("*").eq("company_id",companyId).order("date",{ascending:false}),
       supabase.from("categories").select("data").eq("id",companyId+":cats").maybeSingle(),
       supabase.from("categories").select("data").eq("id",companyId+":locs").maybeSingle(),
+      supabase.from("categories").select("data").eq("id",companyId+":makers").maybeSingle(),
+      supabase.from("categories").select("data").eq("id",companyId+":suppliers").maybeSingle(),
     ]);
-    if(prods.data) setDb(prods.data.map(prodFromDB));
+    const prodList=prods.data?prods.data.map(prodFromDB):[];
+    if(prods.data) setDb(prodList);
     if(inc.data) setIncoming(inc.data.map(incFromDB));
     if(out.data) setOutgoing(out.data.map(outFromDB));
     if(catsRow.data?.data) setCats(catsRow.data.data);
     if(locsRow.data?.data) setLocations(locsRow.data.data);
+    // メーカー／仕入先マスタ: 行が存在すれば（空配列でも）それを使う。
+    // 行が存在しない場合に限り、既存商品に入っている値から初期一覧を作って保存する
+    // （一度作った行は再投入しないので、ユーザーが削除した項目は復活しない）。
+    if(makersRow.data){
+      if(Array.isArray(makersRow.data.data)) setMakers(makersRow.data.data);
+    } else {
+      const seed=[...new Set(prodList.map(i=>i.maker).filter(v=>v&&String(v).trim()))];
+      setMakers(seed);
+      await supabase.from("categories").upsert({id:companyId+":makers",company_id:companyId,data:seed});
+    }
+    if(suppliersRow.data){
+      if(Array.isArray(suppliersRow.data.data)) setSuppliers(suppliersRow.data.data);
+    } else {
+      const seed=[...new Set(prodList.map(i=>i.supplier).filter(v=>v&&String(v).trim()))];
+      setSuppliers(seed);
+      await supabase.from("categories").upsert({id:companyId+":suppliers",company_id:companyId,data:seed});
+    }
     setDataLoading(false);
   }
 
@@ -490,6 +514,46 @@ export default function App(){
     const next=locations.filter((_,j)=>j!==i);
     setLocations(next);
     saveLocations(next);
+    addToast("削除しました","info");
+  }
+
+  // メーカーマスタ保存
+  async function saveMakers(list){
+    if(!profile)return;
+    await supabase.from("categories").upsert({id:profile.company_id+":makers",company_id:profile.company_id,data:list});
+  }
+  function addMaker(){
+    if(!newMaker.trim())return;
+    const next=[...makers,newMaker.trim()];
+    setMakers(next);
+    saveMakers(next);
+    setNewMaker("");
+    addToast("メーカーを追加しました","ok");
+  }
+  function removeMaker(i){
+    const next=makers.filter((_,j)=>j!==i);
+    setMakers(next);
+    saveMakers(next);
+    addToast("削除しました","info");
+  }
+
+  // 仕入先マスタ保存
+  async function saveSuppliers(list){
+    if(!profile)return;
+    await supabase.from("categories").upsert({id:profile.company_id+":suppliers",company_id:profile.company_id,data:list});
+  }
+  function addSupplier(){
+    if(!newSupplier.trim())return;
+    const next=[...suppliers,newSupplier.trim()];
+    setSuppliers(next);
+    saveSuppliers(next);
+    setNewSupplier("");
+    addToast("仕入先を追加しました","ok");
+  }
+  function removeSupplier(i){
+    const next=suppliers.filter((_,j)=>j!==i);
+    setSuppliers(next);
+    saveSuppliers(next);
     addToast("削除しました","info");
   }
 
@@ -1021,6 +1085,42 @@ export default function App(){
             </div>
           </div>
 
+          {/* メーカーマスタ */}
+          <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>🏭 メーカーマスタ</div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input style={{...inpS,flex:1}} type="text" placeholder="例：ユニ・チャーム・コカ・コーラ" value={newMaker} onChange={e=>setNewMaker(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addMaker();}}/>
+              <button style={btnP} onClick={addMaker}>追加</button>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {makers.length===0&&<div style={{fontSize:12,color:"#484F58"}}>まだメーカーが登録されていません</div>}
+              {makers.map((mk,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:6,background:"#1C2128",border:"1px solid #30363D",borderRadius:6,padding:"6px 10px"}}>
+                  <span style={{color:"#58A6FF",fontWeight:600,fontSize:13}}>{mk}</span>
+                  <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#F85149",fontSize:14,padding:"0 2px"}} onClick={()=>removeMaker(i)}>×</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 仕入先マスタ */}
+          <div style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>🏢 仕入先マスタ</div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input style={{...inpS,flex:1}} type="text" placeholder="例：〇〇商事・△△卸" value={newSupplier} onChange={e=>setNewSupplier(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addSupplier();}}/>
+              <button style={btnP} onClick={addSupplier}>追加</button>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {suppliers.length===0&&<div style={{fontSize:12,color:"#484F58"}}>まだ仕入先が登録されていません</div>}
+              {suppliers.map((sp,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:6,background:"#1C2128",border:"1px solid #30363D",borderRadius:6,padding:"6px 10px"}}>
+                  <span style={{color:"#58A6FF",fontWeight:600,fontSize:13}}>{sp}</span>
+                  <button style={{background:"transparent",border:"none",cursor:"pointer",color:"#F85149",fontSize:14,padding:"0 2px"}} onClick={()=>removeSupplier(i)}>×</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {cats.map(l1=>(
             <div key={l1.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:14,marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -1189,8 +1289,22 @@ export default function App(){
                 </div>
                 {arCost&&calcM(modal.product.price,Number(arCost))!==null&&<div style={{fontSize:11,color:"#484F58",textAlign:"right"}}>粗利率: <span style={{fontWeight:700,color:mCol(calcM(modal.product.price,Number(arCost)))}}>{calcM(modal.product.price,Number(arCost))}%</span></div>}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                  <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div><input style={inpS} type="text" placeholder="例：ユニ・チャーム" value={arMaker} onChange={e=>setArMaker(e.target.value)}/></div>
-                  <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div><input style={inpS} type="text" placeholder="例：〇〇商事" value={arSupplier} onChange={e=>setArSupplier(e.target.value)}/></div>
+                  <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div>
+                    <select style={inpS} value={arMaker} onChange={e=>setArMaker(e.target.value)}>
+                      <option value="">未設定</option>
+                      {makers.map(mk=><option key={mk} value={mk}>{mk}</option>)}
+                      {arMaker&&!makers.includes(arMaker)&&<option value={arMaker}>{arMaker}</option>}
+                    </select>
+                    {makers.length===0&&<div style={{fontSize:10,color:"#484F58",marginTop:4}}>💡 カテゴリ登録タブでメーカーを追加できます</div>}
+                  </div>
+                  <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div>
+                    <select style={inpS} value={arSupplier} onChange={e=>setArSupplier(e.target.value)}>
+                      <option value="">未設定</option>
+                      {suppliers.map(sp=><option key={sp} value={sp}>{sp}</option>)}
+                      {arSupplier&&!suppliers.includes(arSupplier)&&<option value={arSupplier}>{arSupplier}</option>}
+                    </select>
+                    {suppliers.length===0&&<div style={{fontSize:10,color:"#484F58",marginTop:4}}>💡 カテゴリ登録タブで仕入先を追加できます</div>}
+                  </div>
                 </div>
                 {modal.isNew&&<CategorySelect cats={cats} l1={arL1} l2={arL2} l3={arL3} onChange={(l1,l2,l3)=>{setArL1(l1);setArL2(l2);setArL3(l3);}} inpS={inpS}/>}
               </div>)}
@@ -1221,7 +1335,24 @@ export default function App(){
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div><input style={inpS} type="text" value={editModal.name} onChange={e=>setEditModal(m=>({...m,name:e.target.value}))}/></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>単価（円）</div><input style={inpS} type="number" min="0" value={editModal.price} onChange={e=>setEditModal(m=>({...m,price:Number(e.target.value)||0}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ値（円）</div><input style={inpS} type="number" min="0" value={editModal.cost||""} onChange={e=>setEditModal(m=>({...m,cost:Number(e.target.value)||0}))}/></div></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫数（入庫・出庫で変動）</div><div style={{...inpS,fontFamily:"monospace",fontWeight:700,color:"#8B949E",cursor:"default"}} title="在庫数は入庫・出庫の記録でのみ変わります">{editModal.qty} 個</div></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>発注点</div><input style={inpS} type="number" min="0" value={editModal.reorderPoint||0} onChange={e=>setEditModal(m=>({...m,reorderPoint:Number(e.target.value)||0}))}/></div></div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div><input style={inpS} type="text" value={editModal.maker||""} onChange={e=>setEditModal(m=>({...m,maker:e.target.value}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div><input style={inpS} type="text" value={editModal.supplier||""} onChange={e=>setEditModal(m=>({...m,supplier:e.target.value}))}/></div></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div>
+                  <select style={inpS} value={editModal.maker||""} onChange={e=>setEditModal(m=>({...m,maker:e.target.value}))}>
+                    <option value="">未設定</option>
+                    {makers.map(mk=><option key={mk} value={mk}>{mk}</option>)}
+                    {editModal.maker&&!makers.includes(editModal.maker)&&<option value={editModal.maker}>{editModal.maker}</option>}
+                  </select>
+                  {makers.length===0&&<div style={{fontSize:10,color:"#484F58",marginTop:4}}>💡 カテゴリ登録タブでメーカーを追加できます</div>}
+                </div>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div>
+                  <select style={inpS} value={editModal.supplier||""} onChange={e=>setEditModal(m=>({...m,supplier:e.target.value}))}>
+                    <option value="">未設定</option>
+                    {suppliers.map(sp=><option key={sp} value={sp}>{sp}</option>)}
+                    {editModal.supplier&&!suppliers.includes(editModal.supplier)&&<option value={editModal.supplier}>{editModal.supplier}</option>}
+                  </select>
+                  {suppliers.length===0&&<div style={{fontSize:10,color:"#484F58",marginTop:4}}>💡 カテゴリ登録タブで仕入先を追加できます</div>}
+                </div>
+              </div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫場所</div>
                 <select style={inpS} value={editModal.location||""} onChange={e=>setEditModal(m=>({...m,location:e.target.value}))}>
                   <option value="">未設定</option>
@@ -1247,7 +1378,24 @@ export default function App(){
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>JANコード</div><input style={inpS} type="text" value={incomingModal.jan} onChange={e=>setIncomingModal(m=>({...m,jan:e.target.value}))}/></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>入庫数量</div><input style={inpS} type="number" min="1" value={incomingModal.qty} onChange={e=>setIncomingModal(m=>({...m,qty:Number(e.target.value)||1,totalCost:(Number(e.target.value)||1)*(m.cost||0)}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ単価（円）</div><input style={inpS} type="number" min="0" value={incomingModal.cost} onChange={e=>setIncomingModal(m=>({...m,cost:Number(e.target.value)||0,totalCost:(m.qty||1)*(Number(e.target.value)||0)}))}/></div></div>
               <div style={{background:"#1C2128",borderRadius:6,padding:"8px 12px",fontSize:12}}>仕入れ合計: <span style={{fontFamily:"monospace",fontWeight:700,color:"#3FB950",fontSize:14}}>{fmtY(incomingModal.totalCost)}</span></div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div><input style={inpS} type="text" value={incomingModal.maker} onChange={e=>setIncomingModal(m=>({...m,maker:e.target.value}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div><input style={inpS} type="text" value={incomingModal.supplier} onChange={e=>setIncomingModal(m=>({...m,supplier:e.target.value}))}/></div></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div>
+                  <select style={inpS} value={incomingModal.maker||""} onChange={e=>setIncomingModal(m=>({...m,maker:e.target.value}))}>
+                    <option value="">未設定</option>
+                    {makers.map(mk=><option key={mk} value={mk}>{mk}</option>)}
+                    {incomingModal.maker&&!makers.includes(incomingModal.maker)&&<option value={incomingModal.maker}>{incomingModal.maker}</option>}
+                  </select>
+                  {makers.length===0&&<div style={{fontSize:10,color:"#484F58",marginTop:4}}>💡 カテゴリ登録タブでメーカーを追加できます</div>}
+                </div>
+                <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div>
+                  <select style={inpS} value={incomingModal.supplier||""} onChange={e=>setIncomingModal(m=>({...m,supplier:e.target.value}))}>
+                    <option value="">未設定</option>
+                    {suppliers.map(sp=><option key={sp} value={sp}>{sp}</option>)}
+                    {incomingModal.supplier&&!suppliers.includes(incomingModal.supplier)&&<option value={incomingModal.supplier}>{incomingModal.supplier}</option>}
+                  </select>
+                  {suppliers.length===0&&<div style={{fontSize:10,color:"#484F58",marginTop:4}}>💡 カテゴリ登録タブで仕入先を追加できます</div>}
+                </div>
+              </div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>備考</div><input style={inpS} type="text" value={incomingModal.note} onChange={e=>setIncomingModal(m=>({...m,note:e.target.value}))}/></div>
             </div>
             <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}><button style={btnG} onClick={()=>setIncomingModal(null)}>キャンセル</button><button style={btnP} onClick={confirmAddIncoming}>追加する</button></div>
