@@ -575,14 +575,11 @@ export default function App(){
   async function saveEditModal(){
     if(!editModal||!profile)return;
     const orig=db.find(i=>i.id===editModal.id);
-    const dbObj=prodToDB(editModal,profile.company_id);const qtyVal=dbObj.qty;delete dbObj.qty;
+    const dbObj=prodToDB(editModal,profile.company_id);delete dbObj.qty;
     const{error}=await supabase.from("products").update(dbObj).eq("id",editModal.id);
     if(error){addToast("エラーが発生しました","err");return;}
-    const{error:qtyError}=await supabase.rpc("sm_set_qty",{p_product_id:editModal.id,p_qty:qtyVal});
-    if(qtyError){addToast("エラーが発生しました","err");return;}
-    setDb(d=>d.map(i=>i.id===editModal.id?editModal:i));setEditModal(null);addToast("保存しました","ok");
+    setDb(d=>d.map(i=>i.id===editModal.id?(orig?{...editModal,qty:orig.qty}:editModal):i));setEditModal(null);addToast("保存しました","ok");
     if(orig){
-      if(qtyVal!==orig.qty)logAction("product_qty_set",{targetName:editModal.name,targetJan:editModal.jan,qty:qtyVal,detail:{from:orig.qty,to:qtyVal}});
       const fieldLabels={jan:"JAN",name:"商品名",price:"単価",cost:"仕入れ値",reorderPoint:"発注点",maker:"メーカー",supplier:"仕入れ先",location:"在庫場所",catL1:"カテゴリ",catL2:"カテゴリ",catL3:"カテゴリ"};
       const changed=[];
       for(const k of["jan","name","price","cost","reorderPoint","maker","supplier","location","catL1","catL2","catL3"]){if((editModal[k]??"")!==(orig[k]??"")&&!changed.includes(fieldLabels[k]))changed.push(fieldLabels[k]);}
@@ -591,16 +588,15 @@ export default function App(){
   }
 
   async function saveEdit(id,field,val){
+    if(field==="qty")return; // 在庫数は入庫・出庫の記録でのみ変わる（マスタでの直接編集は廃止）
     const item=db.find(i=>i.id===id);
-    const isNum=["price","cost","qty","reorderPoint"].includes(field);
+    const isNum=["price","cost","reorderPoint"].includes(field);
     const numVal=isNum?Number(val)||0:val;
-    const colMap={price:"price",cost:"cost",qty:"qty",reorderPoint:"reorder_point",name:"name",jan:"jan",maker:"maker",supplier:"supplier",location:"location"};
-    if(field==="qty"){await supabase.rpc("sm_set_qty",{p_product_id:id,p_qty:numVal});}
-    else{await supabase.from("products").update({[colMap[field]||field]:numVal}).eq("id",id);}
+    const colMap={price:"price",cost:"cost",reorderPoint:"reorder_point",name:"name",jan:"jan",maker:"maker",supplier:"supplier",location:"location"};
+    await supabase.from("products").update({[colMap[field]||field]:numVal}).eq("id",id);
     setDb(d=>d.map(i=>i.id!==id?i:{...i,[field]:numVal}));setEditItem(null);
     if(item&&numVal!==item[field]){
-      if(field==="qty")logAction("product_qty_set",{targetName:item.name,targetJan:item.jan,qty:numVal,detail:{from:item.qty,to:numVal}});
-      else{const fieldLabels={price:"単価",cost:"仕入れ値",reorderPoint:"発注点",name:"商品名",jan:"JAN",maker:"メーカー",supplier:"仕入れ先",location:"在庫場所"};logAction("product_update",{targetName:item.name,targetJan:item.jan,detail:{fields:[fieldLabels[field]||field]}});}
+      const fieldLabels={price:"単価",cost:"仕入れ値",reorderPoint:"発注点",name:"商品名",jan:"JAN",maker:"メーカー",supplier:"仕入れ先",location:"在庫場所"};logAction("product_update",{targetName:item.name,targetJan:item.jan,detail:{fields:[fieldLabels[field]||field]}});
     }
   }
 
@@ -876,7 +872,7 @@ export default function App(){
                         <td style={{...tdS,fontFamily:"monospace",color:"#58A6FF",fontWeight:600}}>{EditCell(item,"price",fmtY(item.price),80,true)}</td>
                         <td style={{...tdS,fontFamily:"monospace",color:"#8B949E"}}>{EditCell(item,"cost",item.cost?fmtY(item.cost):"—",80,true)}</td>
                         <td style={{...tdS,fontFamily:"monospace",fontWeight:600,color:mCol(m)}}>{m!==null?m+"%":"—"}</td>
-                        <td style={{...tdS,fontFamily:"monospace",fontWeight:700}}>{EditCell(item,"qty",item.qty,60,true)}</td>
+                        <td style={{...tdS,fontFamily:"monospace",fontWeight:700}}>{item.qty}</td>
                         <td style={{...tdS,fontFamily:"monospace",color:"#484F58"}}>{EditCell(item,"reorderPoint",item.reorderPoint||0,60,true)}</td>
                         <td style={tdS}>{item.qty===0?<span style={{background:"rgba(248,81,73,.12)",color:"#F85149",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>在庫なし</span>:isAl?<span style={{background:"rgba(248,81,73,.12)",color:"#F85149",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>⚠発注要</span>:item.qty<=5?<span style={{background:"rgba(210,153,34,.12)",color:"#D29922",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>残りわずか</span>:<span style={{background:"rgba(63,185,80,.12)",color:"#3FB950",padding:"2px 6px",borderRadius:4,fontSize:10,fontWeight:700}}>在庫あり</span>}</td>
                         <td style={{...tdS,fontSize:10,color:"#484F58"}}>{item.addedAt}</td>
@@ -1203,7 +1199,7 @@ export default function App(){
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>JANコード</div><input style={inpS} type="text" value={editModal.jan||""} onChange={e=>setEditModal(m=>({...m,jan:e.target.value.replace(/\D/g,"").slice(0,13)}))}/></div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div><input style={inpS} type="text" value={editModal.name} onChange={e=>setEditModal(m=>({...m,name:e.target.value}))}/></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>単価（円）</div><input style={inpS} type="number" min="0" value={editModal.price} onChange={e=>setEditModal(m=>({...m,price:Number(e.target.value)||0}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ値（円）</div><input style={inpS} type="number" min="0" value={editModal.cost||""} onChange={e=>setEditModal(m=>({...m,cost:Number(e.target.value)||0}))}/></div></div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫数</div><input style={inpS} type="number" min="0" value={editModal.qty} onChange={e=>setEditModal(m=>({...m,qty:Number(e.target.value)||0}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>発注点</div><input style={inpS} type="number" min="0" value={editModal.reorderPoint||0} onChange={e=>setEditModal(m=>({...m,reorderPoint:Number(e.target.value)||0}))}/></div></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫数（入庫・出庫で変動）</div><div style={{...inpS,fontFamily:"monospace",fontWeight:700,color:"#8B949E",cursor:"default"}} title="在庫数は入庫・出庫の記録でのみ変わります">{editModal.qty} 個</div></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>発注点</div><input style={inpS} type="number" min="0" value={editModal.reorderPoint||0} onChange={e=>setEditModal(m=>({...m,reorderPoint:Number(e.target.value)||0}))}/></div></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div><input style={inpS} type="text" value={editModal.maker||""} onChange={e=>setEditModal(m=>({...m,maker:e.target.value}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ先</div><input style={inpS} type="text" value={editModal.supplier||""} onChange={e=>setEditModal(m=>({...m,supplier:e.target.value}))}/></div></div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫場所</div>
                 <select style={inpS} value={editModal.location||""} onChange={e=>setEditModal(m=>({...m,location:e.target.value}))}>
