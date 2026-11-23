@@ -156,6 +156,9 @@ function incToDB(r,cid){return{company_id:cid,date:r.date,jan:r.jan,name:r.name,
 function outFromDB(r){return{id:r.id,date:r.date,jan:r.jan,name:r.name,qty:r.qty,price:r.price,totalPrice:r.total_price,destination:r.destination||"",note:r.note||""};}
 function outToDB(r,cid){return{company_id:cid,date:r.date,jan:r.jan,name:r.name,qty:r.qty,price:r.price||0,total_price:r.totalPrice||0,destination:r.destination||"",note:r.note||""};}
 
+// 監査ログの操作コード → 表示名
+const AUDIT_ACTION_LABELS={incoming_create:"📥 入庫",outgoing_create:"📤 出庫",incoming_delete:"入庫履歴の削除",outgoing_delete:"出庫履歴の削除",product_create:"商品登録",product_update:"商品編集",product_qty_set:"在庫数の変更",product_delete:"商品削除"};
+
 function exportCSV(db,cats){
   const hdr="JAN,商品名,大分類,中分類,小分類,メーカー,仕入れ先,単価,仕入れ値,粗利率,在庫数,発注点,登録日";
   const rows=db.map(i=>[i.jan,'"'+i.name+'"',findL1(cats,i.catL1)?.name||"",findL2(cats,i.catL1,i.catL2)?.name||"",findL3(cats,i.catL1,i.catL2,i.catL3)?.name||"",'"'+(i.maker||"")+'"','"'+(i.supplier||"")+'"',i.price,i.cost||0,calcM(i.price,i.cost)||"",i.qty,i.reorderPoint||0,i.addedAt].join(","));
@@ -211,6 +214,9 @@ export default function App(){
   const[authError,setAuthError]=useState("");
   const[authBusy,setAuthBusy]=useState(false);
   const[staffList,setStaffList]=useState([]);
+  const[auditLogs,setAuditLogs]=useState([]);
+  const[auditLoading,setAuditLoading]=useState(false);
+  const[auditError,setAuditError]=useState("");
   const[pendingAdmins,setPendingAdmins]=useState([]);
   const[legalModal,setLegalModal]=useState(null); // "terms" | "privacy" | null
   const[locations,setLocations]=useState([]); // 在庫場所マスタ
@@ -344,6 +350,35 @@ export default function App(){
     else{addToast(action==="approve"?"承認しました":"却下しました","ok");loadPendingAdmins();}
   }
 
+  // ── 監査ログ ──────────────────────────────────────────
+  // 操作の記録（誰が・いつ・何をしたか）。各操作の成功直後に呼ぶ。
+  // 記録に失敗しても本来の操作は止めない（best-effort）。
+  async function logAction(action,{targetName=null,targetJan=null,qty=null,detail=null}={}){
+    if(!profile)return;
+    try{
+      await supabase.from("sm_audit_logs").insert({company_id:profile.company_id,user_id:profile.id,user_name:profile.name||null,user_email:profile.email||null,action,target_name:targetName,target_jan:targetJan,qty,detail});
+    }catch(e){/* ログ記録の失敗で本来の操作を止めない */}
+  }
+
+  async function loadAuditLogs(){
+    if(!profile)return;
+    setAuditLoading(true);setAuditError("");
+    const{data,error}=await supabase.from("sm_audit_logs").select("*").eq("company_id",profile.company_id).order("created_at",{ascending:false}).limit(200);
+    if(error)setAuditError("操作ログの読み込みに失敗しました");
+    else setAuditLogs(data||[]);
+    setAuditLoading(false);
+  }
+
+  // ログの「数量・補足」欄の表示文字列を作る
+  function auditDetailText(log){
+    const d=log.detail||{};const parts=[];
+    if(log.action==="product_qty_set"){if(d.from!=null&&d.to!=null)parts.push(d.from+"個 → "+d.to+"個");}
+    else if(log.qty!=null)parts.push(log.qty+"個");
+    if(d.destination)parts.push("販売先: "+d.destination);
+    if(d.fields&&d.fields.length)parts.push("変更: "+d.fields.join("・"));
+    return parts.join(" / ");
+  }
+
   // ── 認証 ──────────────────────────────────────────────
   async function handleLogin(){
     setAuthBusy(true);setAuthError("");
@@ -472,6 +507,7 @@ export default function App(){
         const{data,error}=await supabase.from("products").insert(prodToDB({...product,cost,qty:arQty,reorderPoint:5,catL1:arL1,catL2:arL2,catL3:arL3,maker:arMaker,supplier:arSupplier,addedAt:today()},profile.company_id)).select().single();
         if(error){addToast("エラーが発生しました","err");return;}
         setDb(d=>[prodFromDB(data),...d]);addToast("新規登録＋入庫 ("+arQty+"個)","ok");
+        logAction("product_create",{targetName:product.name,targetJan:product.jan,qty:arQty});
         if(c>0){const{data:incData}=await supabase.from("incoming").insert(incToDB({date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,totalCost:arQty*c,maker:arMaker||existing?.maker||"",supplier:arSupplier||existing?.supplier||"",note:""},profile.company_id)).select().single();if(incData)setIncoming(h=>[incFromDB(incData),...h]);}
       }else{
         const incRec=c>0?{date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,total_cost:arQty*c,maker:arMaker||existing.maker||"",supplier:arSupplier||existing.supplier||"",note:""}:null;
@@ -481,6 +517,7 @@ export default function App(){
         setDb(d=>d.map(i=>i.id===existing.id?{...i,qty:newQty,cost:cost||i.cost,catL1:arL1||i.catL1,catL2:arL2||i.catL2,catL3:arL3||i.catL3,maker:arMaker||i.maker,supplier:arSupplier||i.supplier}:i));
         if(data.incoming)setIncoming(h=>[incFromDB(data.incoming),...h]);
         addToast("入庫 +"+arQty+"個 (計"+newQty+"個)","ok");
+        logAction("incoming_create",{targetName:product.name,targetJan:product.jan,qty:arQty});
       }
     }else{
       if(!existing){addToast("未登録商品は出庫できません","err");return;}
@@ -491,6 +528,7 @@ export default function App(){
       setDb(d=>d.map(i=>i.id===existing.id?{...i,qty:data.new_qty}:i));
       if(data.outgoing)setOutgoing(o=>[outFromDB(data.outgoing),...o]);
       addToast("出庫 -"+arQty+"個","ok");
+      logAction("outgoing_create",{targetName:product.name,targetJan:product.jan,qty:arQty,detail:arDestination?{destination:arDestination}:null});
     }
     setModal(null);
   }
@@ -510,6 +548,7 @@ export default function App(){
     if(error){addToast("エラーが発生しました","err");return;}
     setIncoming(h=>[incFromDB(data.incoming),...h]);
     if(data.product_id!=null)setDb(d=>d.map(i=>i.id===data.product_id?{...i,qty:data.new_qty}:i));
+    logAction("incoming_create",{targetName:rec.name,targetJan:rec.jan||null,qty:rec.qty||0});
     setIncomingModal(null);addToast("入庫履歴を追加（在庫+"+incomingModal.qty+"個）","ok");
   }
 
@@ -529,41 +568,62 @@ export default function App(){
       if(error){addToast("エラーが発生しました","err");return;}
       setOutgoing(o=>[outFromDB(data),...o]);
     }
+    logAction("outgoing_create",{targetName:rec.name,targetJan:rec.jan||null,qty:rec.qty,detail:rec.destination?{destination:rec.destination}:null});
     setOutgoingModal(null);addToast("出庫を記録（在庫-"+outgoingModal.qty+"個）","ok");
   }
 
   async function saveEditModal(){
     if(!editModal||!profile)return;
+    const orig=db.find(i=>i.id===editModal.id);
     const dbObj=prodToDB(editModal,profile.company_id);const qtyVal=dbObj.qty;delete dbObj.qty;
     const{error}=await supabase.from("products").update(dbObj).eq("id",editModal.id);
     if(error){addToast("エラーが発生しました","err");return;}
     const{error:qtyError}=await supabase.rpc("sm_set_qty",{p_product_id:editModal.id,p_qty:qtyVal});
     if(qtyError){addToast("エラーが発生しました","err");return;}
     setDb(d=>d.map(i=>i.id===editModal.id?editModal:i));setEditModal(null);addToast("保存しました","ok");
+    if(orig){
+      if(qtyVal!==orig.qty)logAction("product_qty_set",{targetName:editModal.name,targetJan:editModal.jan,qty:qtyVal,detail:{from:orig.qty,to:qtyVal}});
+      const fieldLabels={jan:"JAN",name:"商品名",price:"単価",cost:"仕入れ値",reorderPoint:"発注点",maker:"メーカー",supplier:"仕入れ先",location:"在庫場所",catL1:"カテゴリ",catL2:"カテゴリ",catL3:"カテゴリ"};
+      const changed=[];
+      for(const k of["jan","name","price","cost","reorderPoint","maker","supplier","location","catL1","catL2","catL3"]){if((editModal[k]??"")!==(orig[k]??"")&&!changed.includes(fieldLabels[k]))changed.push(fieldLabels[k]);}
+      if(changed.length)logAction("product_update",{targetName:editModal.name,targetJan:editModal.jan,detail:{fields:changed}});
+    }
   }
 
   async function saveEdit(id,field,val){
+    const item=db.find(i=>i.id===id);
     const isNum=["price","cost","qty","reorderPoint"].includes(field);
     const numVal=isNum?Number(val)||0:val;
     const colMap={price:"price",cost:"cost",qty:"qty",reorderPoint:"reorder_point",name:"name",jan:"jan",maker:"maker",supplier:"supplier",location:"location"};
     if(field==="qty"){await supabase.rpc("sm_set_qty",{p_product_id:id,p_qty:numVal});}
     else{await supabase.from("products").update({[colMap[field]||field]:numVal}).eq("id",id);}
     setDb(d=>d.map(i=>i.id!==id?i:{...i,[field]:numVal}));setEditItem(null);
+    if(item&&numVal!==item[field]){
+      if(field==="qty")logAction("product_qty_set",{targetName:item.name,targetJan:item.jan,qty:numVal,detail:{from:item.qty,to:numVal}});
+      else{const fieldLabels={price:"単価",cost:"仕入れ値",reorderPoint:"発注点",name:"商品名",jan:"JAN",maker:"メーカー",supplier:"仕入れ先",location:"在庫場所"};logAction("product_update",{targetName:item.name,targetJan:item.jan,detail:{fields:[fieldLabels[field]||field]}});}
+    }
   }
 
   async function deleteProduct(id){
+    const item=db.find(i=>i.id===id);
+    if(!window.confirm((item?item.name+" を":"この商品を")+"削除しますか？"))return;
     await supabase.from("products").delete().eq("id",id);
     setDb(d=>d.filter(i=>i.id!==id));addToast("削除しました","info");
+    if(item)logAction("product_delete",{targetName:item.name,targetJan:item.jan});
   }
   async function deleteIncoming(h){
+    if(!window.confirm(h.name+" の入庫履歴（"+h.qty+"個）を削除しますか？\n削除すると在庫が "+h.qty+" 個減ります（0個未満にはなりません）"))return;
     const{data}=await supabase.rpc("sm_delete_incoming",{p_id:h.id});
     if(data&&data.product_id!=null)setDb(d=>d.map(i=>i.id===data.product_id?{...i,qty:data.new_qty}:i));
     setIncoming(s=>s.filter(x=>x.id!==h.id));addToast("削除しました","info");
+    logAction("incoming_delete",{targetName:h.name,targetJan:h.jan||null,qty:h.qty});
   }
   async function deleteOutgoing(o){
+    if(!window.confirm(o.name+" の出庫履歴（"+o.qty+"個）を削除しますか？\n削除すると在庫が "+o.qty+" 個戻ります"))return;
     const{data}=await supabase.rpc("sm_delete_outgoing",{p_id:o.id});
     if(data&&data.product_id!=null)setDb(d=>d.map(i=>i.id===data.product_id?{...i,qty:data.new_qty}:i));
     setOutgoing(s=>s.filter(x=>x.id!==o.id));addToast("削除しました","info");
+    logAction("outgoing_delete",{targetName:o.name,targetJan:o.jan||null,qty:o.qty,detail:o.destination?{destination:o.destination}:null});
   }
 
   // 計算
@@ -698,10 +758,10 @@ export default function App(){
           ["incoming","📥 入庫履歴"],
           ["outgoing","📤 出庫履歴"],
           ["account","🔑 パスワード変更"],
-          ...(isAdmin?[["dashboard","📊 分析"],["categories","🗂 カテゴリ登録"],["staff","👥 スタッフ管理"]]:[]),
+          ...(isAdmin?[["dashboard","📊 分析"],["categories","🗂 カテゴリ登録"],["staff","👥 スタッフ管理"],["audit","📜 操作ログ"]]:[]),
           ...(profile.is_platform_admin?[["platform","🛡 運営管理"]]:[]),
         ].map(it=>(
-          <div key={it[0]} style={{flexShrink:0,padding:"10px 12px",fontSize:13,fontWeight:500,color:tab===it[0]?"#58A6FF":"#8B949E",cursor:"pointer",borderBottom:tab===it[0]?"2px solid #58A6FF":"2px solid transparent"}} onClick={()=>{setTab(it[0]);if(it[0]==="staff")loadStaff(profile.company_id);if(it[0]==="platform")loadPendingAdmins();}}>
+          <div key={it[0]} style={{flexShrink:0,padding:"10px 12px",fontSize:13,fontWeight:500,color:tab===it[0]?"#58A6FF":"#8B949E",cursor:"pointer",borderBottom:tab===it[0]?"2px solid #58A6FF":"2px solid transparent"}} onClick={()=>{setTab(it[0]);if(it[0]==="staff")loadStaff(profile.company_id);if(it[0]==="audit")loadAuditLogs();if(it[0]==="platform")loadPendingAdmins();}}>
             {it[1]}{it[0]==="inventory"&&alerts.length>0&&<span style={{marginLeft:4,background:"#F85149",color:"#fff",fontSize:9,padding:"1px 4px",borderRadius:9,fontWeight:700}}>{alerts.length}</span>}
           </div>
         ))}
@@ -710,7 +770,7 @@ export default function App(){
       {/* NAV - スマホ（現在のタブ表示） */}
       {isPhone&&<div style={{background:"#161B22",borderBottom:"1px solid #30363D",padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontSize:13,fontWeight:600,color:"#58A6FF"}}>
-          {{"scan":"📷 スキャン","inventory":"📦 在庫一覧","incoming":"📥 入庫履歴","outgoing":"📤 出庫履歴","account":"🔑 パスワード変更","dashboard":"📊 分析","categories":"🗂 カテゴリ登録","staff":"👥 スタッフ管理","platform":"🛡 運営管理"}[tab]}
+          {{"scan":"📷 スキャン","inventory":"📦 在庫一覧","incoming":"📥 入庫履歴","outgoing":"📤 出庫履歴","account":"🔑 パスワード変更","dashboard":"📊 分析","categories":"🗂 カテゴリ登録","staff":"👥 スタッフ管理","audit":"📜 操作ログ","platform":"🛡 運営管理"}[tab]}
         </div>
         <div style={{fontSize:11,color:"#484F58"}}>☰ メニューで切り替え</div>
       </div>}
@@ -725,11 +785,11 @@ export default function App(){
               ["incoming","📥","入庫履歴"],
               ["outgoing","📤","出庫履歴"],
               ["account","🔑","パスワード変更"],
-              ...(isAdmin?[["dashboard","📊","分析"],["categories","🗂","カテゴリ登録"],["staff","👥","スタッフ管理"]]:[]),
+              ...(isAdmin?[["dashboard","📊","分析"],["categories","🗂","カテゴリ登録"],["staff","👥","スタッフ管理"],["audit","📜","操作ログ"]]:[]),
               ...(profile.is_platform_admin?[["platform","🛡","運営管理"]]:[]),
             ].map(it=>(
               <div key={it[0]} style={{display:"flex",alignItems:"center",gap:14,padding:"16px 20px",borderBottom:"1px solid #21262D",background:tab===it[0]?"rgba(88,166,255,.08)":"transparent",cursor:"pointer"}}
-                onClick={()=>{setTab(it[0]);if(it[0]==="staff")loadStaff(profile.company_id);if(it[0]==="platform")loadPendingAdmins();setMenuOpen(false);}}>
+                onClick={()=>{setTab(it[0]);if(it[0]==="staff")loadStaff(profile.company_id);if(it[0]==="audit")loadAuditLogs();if(it[0]==="platform")loadPendingAdmins();setMenuOpen(false);}}>
                 <span style={{fontSize:22}}>{it[1]}</span>
                 <span style={{fontSize:16,fontWeight:tab===it[0]?700:400,color:tab===it[0]?"#58A6FF":"#E6EDF3"}}>{it[2]}</span>
                 {it[0]==="inventory"&&alerts.length>0&&<span style={{marginLeft:"auto",background:"#F85149",color:"#fff",fontSize:11,padding:"2px 8px",borderRadius:10,fontWeight:700}}>{alerts.length}</span>}
@@ -1024,6 +1084,33 @@ export default function App(){
                   else{addToast(s.name+"さんを削除しました","ok");loadStaff(profile.company_id);}
                 }}>削除</button>}
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 操作ログタブ（管理者のみ） */}
+      {tab==="audit"&&isAdmin&&(
+        <div style={{padding:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:16,fontWeight:700}}>📜 操作ログ</div>
+            <button style={btnG} onClick={loadAuditLogs}>🔄 更新</button>
+          </div>
+          <div style={{fontSize:12,color:"#8B949E",marginBottom:16}}>誰が・いつ・何をしたかの記録です（新しい順、最新200件）。</div>
+          {auditError&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#F85149",marginBottom:12}}>{auditError}</div>}
+          {auditLoading?(
+            <div style={{padding:"40px 20px",textAlign:"center",color:"#484F58"}}>読み込み中…</div>
+          ):auditLogs.length===0?(
+            <div style={{padding:"40px 20px",textAlign:"center",color:"#484F58"}}><div style={{fontSize:40}}>📜</div>まだ記録がありません</div>
+          ):auditLogs.map(log=>(
+            <div key={log.id} style={{background:"#21262D",border:"1px solid #30363D",borderRadius:8,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+              <div style={{fontSize:11,color:"#484F58",fontFamily:"monospace",whiteSpace:"nowrap"}}>{new Date(log.created_at).toLocaleString("ja-JP")}</div>
+              <span style={{background:"rgba(88,166,255,.12)",color:"#58A6FF",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>{AUDIT_ACTION_LABELS[log.action]||log.action}</span>
+              <div style={{flex:1,minWidth:140}}>
+                <div style={{fontWeight:600,fontSize:13}}>{log.target_name||"—"}{log.target_jan&&<span style={{fontFamily:"monospace",fontSize:10,color:"#484F58",marginLeft:8}}>{log.target_jan}</span>}</div>
+                {auditDetailText(log)&&<div style={{fontSize:11,color:"#8B949E"}}>{auditDetailText(log)}</div>}
+              </div>
+              <div style={{fontSize:11,color:"#8B949E",whiteSpace:"nowrap"}}>{log.user_name||log.user_email||"—"}</div>
             </div>
           ))}
         </div>
