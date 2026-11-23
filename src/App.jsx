@@ -198,6 +198,27 @@ function CategorySelect({cats,l1,l2,l3,onChange,inpS}){
   return(<div style={{display:"flex",flexDirection:"column",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:3}}>大分類</div><select style={inpS} value={l1||""} onChange={e=>onChange(e.target.value,"","")}><option value="">選択してください</option>{cats.map(c=><option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:3}}>中分類</div><select style={inpS} value={l2||""} onChange={e=>onChange(l1,e.target.value,"")} disabled={!l1}><option value="">選択してください</option>{l2opts.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:3}}>小分類</div><select style={inpS} value={l3||""} onChange={e=>onChange(l1,l2,e.target.value)} disabled={!l2}><option value="">選択してください</option>{l3opts.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div></div>);
 }
 
+// 手動追加モーダル用: 分類（大→中→小）で絞り込んで商品を選ぶ段階式ピッカー。
+// モーダル内にマウントされるため、開くたびに選択状態は初期化される。
+function ProductPicker({cats,db,inpS,mode,onPick}){
+  const NONE="__none__";
+  const[l1,setL1]=useState("");const[l2,setL2]=useState("");const[l3,setL3]=useState("");const[picked,setPicked]=useState("");
+  const l2opts=(l1&&l1!==NONE)?(findL1(cats,l1)?.children||[]):[];
+  const l3opts=l2?(findL2(cats,l1,l2)?.children||[]):[];
+  // 前方一致で絞り込む（未選択の段は条件に含めない）。「未分類」は catL1 が無い商品のみ。
+  const items=l1===NONE?db.filter(i=>!i.catL1):db.filter(i=>(!l1||i.catL1===l1)&&(!l2||i.catL2===l2)&&(!l3||i.catL3===l3));
+  const label=i=>mode==="out"?(i.name+"（在庫: "+i.qty+"個）"):(i.jan?i.name+"（"+i.jan+"）":i.name);
+  const selS={...inpS,fontSize:12};
+  return(<div style={{display:"flex",flexDirection:"column",gap:6,marginTop:6}}>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+      <select style={selS} value={l1} onChange={e=>{setL1(e.target.value);setL2("");setL3("");setPicked("");}}><option value="">大分類：すべて</option>{cats.map(c=><option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}<option value={NONE}>未分類</option></select>
+      <select style={selS} value={l2} disabled={!l1||l1===NONE} onChange={e=>{setL2(e.target.value);setL3("");setPicked("");}}><option value="">中分類：すべて</option>{l2opts.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+      <select style={selS} value={l3} disabled={!l2} onChange={e=>{setL3(e.target.value);setPicked("");}}><option value="">小分類：すべて</option>{l3opts.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+    </div>
+    <select style={selS} value={picked} onChange={e=>{setPicked(e.target.value);const item=db.find(i=>i.id===Number(e.target.value));if(item)onPick(item);}}><option value="">{mode==="out"?"商品マスタから選択":"← 商品マスタから選択"}（{items.length}件）</option>{items.map(i=><option key={i.id} value={i.id}>{label(i)}</option>)}</select>
+  </div>);
+}
+
 function ItemCard({item,cats,onEdit,onDelete,isAdmin}){
   const m=calcM(item.price,item.cost);const isAl=item.qty<=(item.reorderPoint||0);const l1=findL1(cats,item.catL1);const l3=findL3(cats,item.catL1,item.catL2,item.catL3);
   const badge=item.qty===0?{text:"在庫なし",col:"#F85149",bg:"rgba(248,81,73,.12)"}:isAl?{text:"⚠発注要",col:"#F85149",bg:"rgba(248,81,73,.12)"}:item.qty<=5?{text:"残りわずか",col:"#D29922",bg:"rgba(210,153,34,.12)"}:{text:"在庫あり",col:"#3FB950",bg:"rgba(63,185,80,.12)"};
@@ -1222,7 +1243,7 @@ export default function App(){
             <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"#161B22"}}><div style={{fontSize:14,fontWeight:700}}>📥 入庫履歴を手動追加</div><button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setIncomingModal(null)}>×</button></div>
             <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>入庫日</div><input style={inpS} type="date" value={incomingModal.date} onChange={e=>setIncomingModal(m=>({...m,date:e.target.value}))}/></div>
-              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div><input style={inpS} type="text" placeholder="商品名を入力" value={incomingModal.name} onChange={e=>setIncomingModal(m=>({...m,name:e.target.value}))}/><select style={{...inpS,marginTop:4,fontSize:11}} onChange={e=>{const item=db.find(i=>i.id===Number(e.target.value));if(item)setIncomingModal(m=>({...m,jan:item.jan,name:item.name,cost:item.cost||0,maker:item.maker||"",supplier:item.supplier||"",totalCost:(m.qty||1)*(item.cost||0)}));}}><option value="">← 商品マスタから選択</option>{db.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div><input style={inpS} type="text" placeholder="商品名を入力" value={incomingModal.name} onChange={e=>setIncomingModal(m=>({...m,name:e.target.value}))}/><ProductPicker cats={cats} db={db} inpS={inpS} mode="in" onPick={item=>setIncomingModal(m=>({...m,jan:item.jan,name:item.name,cost:item.cost||0,maker:item.maker||"",supplier:item.supplier||"",totalCost:(m.qty||1)*(item.cost||0)}))}/></div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>JANコード</div><input style={inpS} type="text" value={incomingModal.jan} onChange={e=>setIncomingModal(m=>({...m,jan:e.target.value}))}/></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>入庫数量</div><input style={inpS} type="number" min="1" value={incomingModal.qty} onChange={e=>setIncomingModal(m=>({...m,qty:Number(e.target.value)||1,totalCost:(Number(e.target.value)||1)*(m.cost||0)}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ単価（円）</div><input style={inpS} type="number" min="0" value={incomingModal.cost} onChange={e=>setIncomingModal(m=>({...m,cost:Number(e.target.value)||0,totalCost:(m.qty||1)*(Number(e.target.value)||0)}))}/></div></div>
               <div style={{background:"#1C2128",borderRadius:6,padding:"8px 12px",fontSize:12}}>仕入れ合計: <span style={{fontFamily:"monospace",fontWeight:700,color:"#3FB950",fontSize:14}}>{fmtY(incomingModal.totalCost)}</span></div>
@@ -1241,7 +1262,7 @@ export default function App(){
             <div style={{padding:"14px 16px",borderBottom:"1px solid #30363D",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"#161B22"}}><div style={{fontSize:14,fontWeight:700}}>📤 出庫履歴を手動追加</div><button style={{background:"transparent",border:"none",cursor:"pointer",color:"#8B949E",fontSize:18}} onClick={()=>setOutgoingModal(null)}>×</button></div>
             <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>出庫日</div><input style={inpS} type="date" value={outgoingModal.date} onChange={e=>setOutgoingModal(m=>({...m,date:e.target.value}))}/></div>
-              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品</div><select style={inpS} onChange={e=>{const item=db.find(i=>i.id===Number(e.target.value));if(item)setOutgoingModal(m=>({...m,jan:item.jan,name:item.name,price:item.price||0,totalPrice:(m.qty||1)*(item.price||0)}));}}><option value="">商品マスタから選択</option>{db.map(i=><option key={i.id} value={i.id}>{i.name}（在庫: {i.qty}個）</option>)}</select></div>
+              <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品</div><ProductPicker cats={cats} db={db} inpS={inpS} mode="out" onPick={item=>setOutgoingModal(m=>({...m,jan:item.jan,name:item.name,price:item.price||0,totalPrice:(m.qty||1)*(item.price||0)}))}/></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>出庫数量</div><input style={inpS} type="number" min="1" value={outgoingModal.qty} onChange={e=>setOutgoingModal(m=>({...m,qty:Number(e.target.value)||1,totalPrice:(Number(e.target.value)||1)*(m.price||0)}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>販売単価（円）</div><input style={inpS} type="number" min="0" value={outgoingModal.price} onChange={e=>setOutgoingModal(m=>({...m,price:Number(e.target.value)||0,totalPrice:(m.qty||1)*(Number(e.target.value)||0)}))}/></div></div>
               <div style={{background:"#1C2128",borderRadius:6,padding:"8px 12px",fontSize:12}}>合計売上: <span style={{fontFamily:"monospace",fontWeight:700,color:"#58A6FF",fontSize:14}}>{fmtY(outgoingModal.totalPrice)}</span></div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>販売先・出荷先</div><input style={inpS} type="text" value={outgoingModal.destination} onChange={e=>setOutgoingModal(m=>({...m,destination:e.target.value}))}/></div>
