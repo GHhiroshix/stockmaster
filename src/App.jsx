@@ -157,7 +157,7 @@ function outFromDB(r){return{id:r.id,date:r.date,jan:r.jan,name:r.name,qty:r.qty
 function outToDB(r,cid){return{company_id:cid,date:r.date,jan:r.jan,name:r.name,qty:r.qty,price:r.price||0,total_price:r.totalPrice||0,destination:r.destination||"",note:r.note||""};}
 
 // 監査ログの操作コード → 表示名
-const AUDIT_ACTION_LABELS={incoming_create:"📥 入庫",outgoing_create:"📤 出庫",incoming_delete:"入庫履歴の削除",outgoing_delete:"出庫履歴の削除",product_create:"商品登録",product_update:"商品編集",product_qty_set:"在庫数の変更",product_delete:"商品削除"};
+const AUDIT_ACTION_LABELS={incoming_create:"📥 入庫",outgoing_create:"📤 出庫",incoming_delete:"入庫履歴の削除",outgoing_delete:"出庫履歴の削除",product_create:"商品登録",product_update:"商品編集",product_qty_set:"在庫数の変更",stock_adjust:"在庫調整",product_delete:"商品削除"};
 
 function exportCSV(db,cats){
   const hdr="JAN,商品名,大分類,中分類,小分類,メーカー,仕入れ先,単価,仕入れ値,粗利率,在庫数,発注点,登録日";
@@ -286,6 +286,11 @@ export default function App(){
   const[arLocation,setArLocation]=useState(""); // 新規登録時の在庫場所
   const[arSellPrice,setArSellPrice]=useState("");const[arDestination,setArDestination]=useState("");
   const[editModal,setEditModal]=useState(null);
+  const[adjQty,setAdjQty]=useState(""); // 在庫調整: 実在庫の入力値（文字列）
+  const[adjReason,setAdjReason]=useState(""); // 在庫調整: 理由（必須）
+  const[adjBusy,setAdjBusy]=useState(false); // 在庫調整の二重送信防止
+  const[adjError,setAdjError]=useState("");
+  const[adjDone,setAdjDone]=useState("");
   const[incomingModal,setIncomingModal]=useState(null);
   const[outgoingModal,setOutgoingModal]=useState(null);
   const[toasts,setToasts]=useState([]);
@@ -449,7 +454,8 @@ export default function App(){
   // ログの「数量・補足」欄の表示文字列を作る
   function auditDetailText(log){
     const d=log.detail||{};const parts=[];
-    if(log.action==="product_qty_set"){if(d.from!=null&&d.to!=null)parts.push(d.from+"個 → "+d.to+"個");}
+    if(log.action==="stock_adjust"){if(d.from!=null&&d.to!=null)parts.push(d.from+"個 → "+d.to+"個");if(d.reason)parts.push("理由: "+d.reason);}
+    else if(log.action==="product_qty_set"){if(d.from!=null&&d.to!=null)parts.push(d.from+"個 → "+d.to+"個");}
     else if(log.qty!=null)parts.push(log.qty+"個");
     if(d.destination)parts.push("販売先: "+d.destination);
     if(d.fields&&d.fields.length)parts.push("変更: "+d.fields.join("・"));
@@ -557,6 +563,15 @@ export default function App(){
     else{setPwSuccess("パスワードを変更しました。他の端末では新しいパスワードでログインし直してください。");setPwForm({current:"",newPw:"",confirm:""});}
     setPwBusy(false);
   }
+
+  // ── 在庫調整欄の初期化（編集モーダルで商品が切り替わったとき） ──
+  const editModalId=editModal?.id;
+  useEffect(()=>{
+    if(editModalId==null)return;
+    const item=db.find(i=>i.id===editModalId);
+    setAdjQty(String(item?item.qty:(editModal?.qty??0)));setAdjReason("");setAdjError("");setAdjDone("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[editModalId]);
 
   // ── カテゴリー変更時に自動保存 ─────────────────────────
   const catsRef=useRef(cats);
@@ -744,6 +759,30 @@ export default function App(){
     logAction("outgoing_create",{targetName:rec.name,targetJan:rec.jan||null,qty:rec.qty,detail:rec.destination?{destination:rec.destination}:null});
     setOutgoingModal(null);addToast("出庫を記録（在庫-"+outgoingModal.qty+"個）","ok");
     }finally{setOutBusy(false);}
+  }
+
+  // ── 在庫調整（管理者のみ・理由必須。記録は RPC 側で操作ログに残る） ──
+  async function handleAdjustStock(){
+    if(adjBusy||!editModal||!profile)return;
+    const cur=editModal.qty;
+    const n=Number(adjQty);
+    if(adjQty===""||!Number.isInteger(n)||n<0){setAdjError("実在庫は0以上の整数で入力してください");setAdjDone("");return;}
+    const reason=adjReason.trim();
+    if(!reason){setAdjError("理由を入力してください");setAdjDone("");return;}
+    if(n===cur){setAdjError("現在の在庫数と同じため、変更がありません");setAdjDone("");return;}
+    const diff=n-cur;
+    if(!window.confirm("在庫を "+cur+" → "+n+"（"+(diff>0?"+"+diff:""+diff)+"）に調整します。\n理由："+reason))return;
+    setAdjBusy(true);setAdjError("");setAdjDone("");
+    try{
+      const{data,error}=await supabase.rpc("sm_adjust_stock",{p_product_id:editModal.id,p_new_qty:n,p_reason:reason});
+      if(error){setAdjError("調整に失敗しました："+(error.message||"エラーが発生しました"));return;}
+      const newQty=data?.new_qty??n;
+      await loadData(profile.company_id);
+      setEditModal(m=>m?{...m,qty:newQty}:m);
+      setAdjQty(String(newQty));setAdjReason("");
+      setAdjDone("在庫を "+cur+" 個 → "+newQty+" 個に調整しました");
+      addToast("在庫を調整しました","ok");
+    }finally{setAdjBusy(false);}
   }
 
   async function saveEditModal(){
@@ -1480,6 +1519,17 @@ export default function App(){
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div><input style={inpS} type="text" value={editModal.name} onChange={e=>setEditModal(m=>({...m,name:e.target.value}))}/></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>単価（円）</div><input style={inpS} type="number" min="0" value={editModal.price} onChange={e=>setEditModal(m=>({...m,price:Number(e.target.value)||0}))}/></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ値（円）</div><input style={inpS} type="number" min="0" value={editModal.cost||""} onChange={e=>setEditModal(m=>({...m,cost:Number(e.target.value)||0}))}/></div></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫数（入庫・出庫で変動）</div><div style={{...inpS,fontFamily:"monospace",fontWeight:700,color:"#8B949E",cursor:"default"}} title="在庫数は入庫・出庫の記録でのみ変わります">{editModal.qty} 個</div></div><div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>発注点</div><input style={inpS} type="number" min="0" value={editModal.reorderPoint||0} onChange={e=>setEditModal(m=>({...m,reorderPoint:Number(e.target.value)||0}))}/></div></div>
+              {isAdmin&&<div style={{background:"#1C2128",border:"1px solid #30363D",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontSize:12,fontWeight:700,marginBottom:4}}>🔧 在庫調整（棚卸しなど）</div>
+                <div style={{fontSize:10,color:"#8B949E",marginBottom:8}}>実物の数と在庫数がずれたとき、理由を記録して在庫数を合わせます。調整は操作ログに残り、この欄の操作は「保存する」とは別にすぐ反映されます。</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>実在庫（個）</div><input style={inpS} type="number" min="0" step="1" value={adjQty} onChange={e=>setAdjQty(e.target.value)}/></div>
+                  <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>理由（必須）</div><input style={inpS} type="text" placeholder="例：棚卸し、破損、紛失" value={adjReason} onChange={e=>setAdjReason(e.target.value)}/></div>
+                </div>
+                {adjError&&<div style={{fontSize:11,color:"#F85149",marginTop:6}}>✕ {adjError}</div>}
+                {adjDone&&<div style={{fontSize:11,color:"#3FB950",marginTop:6}}>✓ {adjDone}</div>}
+                <button style={{...btnP,background:"#D29922",color:"#0D1117",marginTop:8,opacity:adjBusy?0.6:1}} disabled={adjBusy} onClick={handleAdjustStock}>在庫を調整する</button>
+              </div>}
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                 <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メーカー</div>
                   <select style={inpS} value={editModal.maker||""} onChange={e=>setEditModal(m=>({...m,maker:e.target.value}))}>
