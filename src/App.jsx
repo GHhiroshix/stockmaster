@@ -269,9 +269,11 @@ export default function App(){
   const[modal,setModal]=useState(null);
   const[arMode,setArMode]=useState("incoming");
   const[arQty,setArQty]=useState(1);
+  const[arQtyInput,setArQtyInput]=useState("1"); // 数量の直接入力用（入力中の文字列。確定値は arQty）
   const[arCost,setArCost]=useState("");
   const[arL1,setArL1]=useState("");const[arL2,setArL2]=useState("");const[arL3,setArL3]=useState("");
   const[arMaker,setArMaker]=useState("");const[arSupplier,setArSupplier]=useState("");
+  const[arLocation,setArLocation]=useState(""); // 新規登録時の在庫場所
   const[arSellPrice,setArSellPrice]=useState("");const[arDestination,setArDestination]=useState("");
   const[editModal,setEditModal]=useState(null);
   const[incomingModal,setIncomingModal]=useState(null);
@@ -563,10 +565,14 @@ export default function App(){
   // ── スキャン処理 ──────────────────────────────────────
   const addToast=useCallback((msg,type="info")=>{const id=Date.now()+Math.random();setToasts(t=>[...t,{id,msg,type}]);setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3400);},[]);
 
+  // 数量の正規化（ステッパー・入力欄の両方から使う）。arQty は常に1以上の整数を保つ
+  function updateQty(n){const v=Math.max(1,Math.floor(Number(n)||1));setArQty(v);setArQtyInput(String(v));}
+
   function openScanModal(product,existing){
-    setModal({product,isNew:!existing,existing});setArMode("incoming");setArQty(1);
+    setModal({product,isNew:!existing,existing});setArMode("incoming");setArQty(1);setArQtyInput("1");
     setArCost(String(existing?.cost||""));setArL1(existing?.catL1||"");setArL2(existing?.catL2||"");setArL3(existing?.catL3||"");
     setArMaker(existing?.maker||"");setArSupplier(existing?.supplier||"");setArSellPrice(String(product.price||""));setArDestination("");
+    setArLocation(existing?.location||"");
   }
 
   const processJan=useCallback(async(code)=>{
@@ -594,11 +600,13 @@ export default function App(){
       const cost=parseInt(arCost)||0;
       const c=cost||existing?.cost||0;
       if(isNew){
-        const{data,error}=await supabase.from("products").insert(prodToDB({...product,cost,qty:arQty,reorderPoint:5,catL1:arL1,catL2:arL2,catL3:arL3,maker:arMaker,supplier:arSupplier,addedAt:today()},profile.company_id)).select().single();
+        // 新規登録では入力された商品名・在庫場所を使う（商品名が空欄なら従来の仮名にフォールバック）
+        const regName=(product.name||"").trim()||("商品 (JAN:"+product.jan+")");
+        const{data,error}=await supabase.from("products").insert(prodToDB({...product,name:regName,location:arLocation,cost,qty:arQty,reorderPoint:5,catL1:arL1,catL2:arL2,catL3:arL3,maker:arMaker,supplier:arSupplier,addedAt:today()},profile.company_id)).select().single();
         if(error){addToast("エラーが発生しました","err");return;}
         setDb(d=>[prodFromDB(data),...d]);addToast("新規登録＋入庫 ("+arQty+"個)","ok");
-        logAction("product_create",{targetName:product.name,targetJan:product.jan,qty:arQty});
-        const{data:incData}=await supabase.from("incoming").insert(incToDB({date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,totalCost:arQty*c,maker:arMaker||existing?.maker||"",supplier:arSupplier||existing?.supplier||"",note:""},profile.company_id)).select().single();if(incData){setIncoming(h=>[incFromDB(incData),...h]);logAction("incoming_create",{targetName:product.name,targetJan:product.jan,qty:arQty});}
+        logAction("product_create",{targetName:regName,targetJan:product.jan,qty:arQty});
+        const{data:incData}=await supabase.from("incoming").insert(incToDB({date:today(),jan:product.jan,name:regName,qty:arQty,cost:c,totalCost:arQty*c,maker:arMaker||existing?.maker||"",supplier:arSupplier||existing?.supplier||"",note:""},profile.company_id)).select().single();if(incData){setIncoming(h=>[incFromDB(incData),...h]);logAction("incoming_create",{targetName:regName,targetJan:product.jan,qty:arQty});}
       }else{
         const incRec={date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,total_cost:arQty*c,maker:arMaker||existing.maker||"",supplier:arSupplier||existing.supplier||"",note:""};
         const{data,error}=await supabase.rpc("sm_receive_stock",{p_product_id:existing.id,p_qty:arQty,p_attrs:{cost:cost||existing.cost||0,cat_l1:arL1||existing.catL1,cat_l2:arL2||existing.catL2,cat_l3:arL3||existing.catL3,maker:arMaker||existing.maker,supplier:arSupplier||existing.supplier},p_incoming:incRec});
@@ -627,9 +635,11 @@ export default function App(){
   // カテゴリー管理
   function openAddCat(level,l1id,l2id){setAddCatModal({level,l1id:l1id||null,l2id:l2id||null});setNewCatName("");setNewCatEmoji("📦");}
   function confirmAddCat(){if(!newCatName.trim()){addToast("名前を入力してください","err");return;}const id="c"+Date.now();const{level,l1id,l2id}=addCatModal;if(level===1)setCats(c=>[...c,{id,name:newCatName,emoji:newCatEmoji,children:[]}]);else if(level===2)setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:[...l1.children,{id,name:newCatName,children:[]}]}));else setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:l1.children.map(l2=>l2.id!==l2id?l2:{...l2,children:[...l2.children,{id,name:newCatName}]})}));setAddCatModal(null);addToast("カテゴリーを追加しました","ok");}
-  function delL1(l1id){if(!window.confirm("削除しますか？"))return;setCats(c=>c.filter(l=>l.id!==l1id));}
-  function delL2(l1id,l2id){if(!window.confirm("削除しますか？"))return;setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:l1.children.filter(l=>l.id!==l2id)}));}
-  function delL3(l1id,l2id,l3id){if(!window.confirm("削除しますか？"))return;setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:l1.children.map(l2=>l2.id!==l2id?l2:{...l2,children:l2.children.filter(l=>l.id!==l3id)})}));}
+  // 分類削除の確認文（対象分類にぶら下がる商品の件数を含める）
+  function catDelConfirm(name,n){return n>0?("『"+name+"』には "+n+" 件の商品が登録されています。削除すると、それらの商品は分類なしとして残ります。削除しますか？"):("『"+name+"』を削除しますか？");}
+  function delL1(l1id){const name=cats.find(l=>l.id===l1id)?.name||"";const n=db.filter(i=>i.catL1===l1id).length;if(!window.confirm(catDelConfirm(name,n)))return;setCats(c=>c.filter(l=>l.id!==l1id));}
+  function delL2(l1id,l2id){const l1=cats.find(l=>l.id===l1id);const name=l1?.children.find(l=>l.id===l2id)?.name||"";const n=db.filter(i=>i.catL2===l2id).length;if(!window.confirm(catDelConfirm(name,n)))return;setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:l1.children.filter(l=>l.id!==l2id)}));}
+  function delL3(l1id,l2id,l3id){const l1=cats.find(l=>l.id===l1id);const l2=l1?.children.find(l=>l.id===l2id);const name=l2?.children.find(l=>l.id===l3id)?.name||"";const n=db.filter(i=>i.catL3===l3id).length;if(!window.confirm(catDelConfirm(name,n)))return;setCats(c=>c.map(l1=>l1.id!==l1id?l1:{...l1,children:l1.children.map(l2=>l2.id!==l2id?l2:{...l2,children:l2.children.filter(l=>l.id!==l3id)})}));}
 
   // 入庫手動追加
   async function confirmAddIncoming(){
@@ -1293,12 +1303,13 @@ export default function App(){
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#1C2128",borderRadius:8,padding:"12px 16px",marginBottom:14,border:"1px solid #30363D"}}>
                 <span style={{fontSize:13,color:"#8B949E",fontWeight:600}}>{arMode==="incoming"?"入庫数量":"出庫数量"}</span>
                 <div style={{display:"flex",alignItems:"center",gap:14}}>
-                  <button style={{width:36,height:36,border:"1px solid #444C56",borderRadius:8,background:"#2D333B",color:"#E6EDF3",cursor:"pointer",fontSize:20,fontWeight:700}} onClick={()=>setArQty(q=>Math.max(1,q-1))}>−</button>
-                  <span style={{fontFamily:"monospace",fontSize:28,fontWeight:700,minWidth:48,textAlign:"center"}}>{arQty}</span>
-                  <button style={{width:36,height:36,border:"1px solid #444C56",borderRadius:8,background:"#2D333B",color:"#E6EDF3",cursor:"pointer",fontSize:20,fontWeight:700}} onClick={()=>setArQty(q=>q+1)}>＋</button>
+                  <button style={{width:36,height:36,border:"1px solid #444C56",borderRadius:8,background:"#2D333B",color:"#E6EDF3",cursor:"pointer",fontSize:20,fontWeight:700}} onClick={()=>updateQty(arQty-1)}>−</button>
+                  <input style={{fontFamily:"monospace",fontSize:28,fontWeight:700,width:84,textAlign:"center",background:"#0D1117",border:"1px solid #30363D",borderRadius:8,color:"#E6EDF3",padding:"2px 0"}} type="text" inputMode="numeric" aria-label="数量" value={arQtyInput} onChange={e=>{const v=e.target.value;setArQtyInput(v);const n=parseInt(v,10);if(!isNaN(n)&&n>=1)setArQty(n);}} onBlur={()=>updateQty(parseInt(arQtyInput,10))}/>
+                  <button style={{width:36,height:36,border:"1px solid #444C56",borderRadius:8,background:"#2D333B",color:"#E6EDF3",cursor:"pointer",fontSize:20,fontWeight:700}} onClick={()=>updateQty(arQty+1)}>＋</button>
                 </div>
               </div>
               {arMode==="incoming"&&(<div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {modal.isNew&&<div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>商品名</div><input style={inpS} type="text" value={modal.product.name} onChange={e=>{const v=e.target.value;setModal(m=>({...m,product:{...m.product,name:v}}));}}/></div>}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>販売単価（円）</div><input style={inpS} type="number" min="0" value={modal.product.price} onChange={e=>{const v=e.target.value;setModal(m=>({...m,product:{...m.product,price:Number(v)||0}}));}}/></div>
                   <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>仕入れ値（円）</div><input style={inpS} type="number" min="0" placeholder="0" value={arCost} onChange={e=>setArCost(e.target.value)}/></div>
@@ -1322,6 +1333,13 @@ export default function App(){
                     {suppliers.length===0&&<div style={{fontSize:10,color:"#484F58",marginTop:4}}>💡 カテゴリ登録タブで仕入先を追加できます</div>}
                   </div>
                 </div>
+                {modal.isNew&&<div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>在庫場所</div>
+                  <select style={inpS} value={arLocation} onChange={e=>setArLocation(e.target.value)}>
+                    <option value="">未設定</option>
+                    {locations.map(loc=><option key={loc} value={loc}>{loc}</option>)}
+                  </select>
+                  {locations.length===0&&<div style={{fontSize:10,color:"#484F58",marginTop:4}}>💡 カテゴリ登録タブで在庫場所を追加できます</div>}
+                </div>}
                 {modal.isNew&&<CategorySelect cats={cats} l1={arL1} l2={arL2} l3={arL3} onChange={(l1,l2,l3)=>{setArL1(l1);setArL2(l2);setArL3(l3);}} inpS={inpS}/>}
               </div>)}
               {arMode==="outgoing"&&!modal.isNew&&(<div style={{display:"flex",flexDirection:"column",gap:10}}>
