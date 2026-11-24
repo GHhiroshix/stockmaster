@@ -249,6 +249,9 @@ export default function App(){
   const[staffForm,setStaffForm]=useState({name:"",email:"",password:""});
   const[pwForm,setPwForm]=useState({current:"",newPw:"",confirm:""});
   const[pwBusy,setPwBusy]=useState(false);
+  const[scanBusy,setScanBusy]=useState(false); // スキャン受入/出庫の二重送信防止
+  const[inBusy,setInBusy]=useState(false); // 入庫手動追加の二重送信防止
+  const[outBusy,setOutBusy]=useState(false); // 出庫手動追加の二重送信防止
   const[pwError,setPwError]=useState("");
   const[pwSuccess,setPwSuccess]=useState("");
   const[staffBusy,setStaffBusy]=useState(false);
@@ -584,7 +587,9 @@ export default function App(){
   const handleCameraDetect=useCallback((code)=>{setShowCamera(false);addToast("スキャン成功: "+code,"ok");setTimeout(()=>processJan(code),300);},[processJan,addToast]);
 
   async function confirmScan(){
-    if(!modal||!profile)return;const{product,isNew,existing}=modal;
+    if(!modal||!profile||scanBusy)return;setScanBusy(true);
+    try{
+    const{product,isNew,existing}=modal;
     if(arMode==="incoming"){
       const cost=parseInt(arCost)||0;
       const c=cost||existing?.cost||0;
@@ -593,9 +598,9 @@ export default function App(){
         if(error){addToast("エラーが発生しました","err");return;}
         setDb(d=>[prodFromDB(data),...d]);addToast("新規登録＋入庫 ("+arQty+"個)","ok");
         logAction("product_create",{targetName:product.name,targetJan:product.jan,qty:arQty});
-        if(c>0){const{data:incData}=await supabase.from("incoming").insert(incToDB({date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,totalCost:arQty*c,maker:arMaker||existing?.maker||"",supplier:arSupplier||existing?.supplier||"",note:""},profile.company_id)).select().single();if(incData)setIncoming(h=>[incFromDB(incData),...h]);}
+        const{data:incData}=await supabase.from("incoming").insert(incToDB({date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,totalCost:arQty*c,maker:arMaker||existing?.maker||"",supplier:arSupplier||existing?.supplier||"",note:""},profile.company_id)).select().single();if(incData){setIncoming(h=>[incFromDB(incData),...h]);logAction("incoming_create",{targetName:product.name,targetJan:product.jan,qty:arQty});}
       }else{
-        const incRec=c>0?{date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,total_cost:arQty*c,maker:arMaker||existing.maker||"",supplier:arSupplier||existing.supplier||"",note:""}:null;
+        const incRec={date:today(),jan:product.jan,name:product.name,qty:arQty,cost:c,total_cost:arQty*c,maker:arMaker||existing.maker||"",supplier:arSupplier||existing.supplier||"",note:""};
         const{data,error}=await supabase.rpc("sm_receive_stock",{p_product_id:existing.id,p_qty:arQty,p_attrs:{cost:cost||existing.cost||0,cat_l1:arL1||existing.catL1,cat_l2:arL2||existing.catL2,cat_l3:arL3||existing.catL3,maker:arMaker||existing.maker,supplier:arSupplier||existing.supplier},p_incoming:incRec});
         if(error){addToast("エラーが発生しました","err");return;}
         const newQty=data.new_qty;
@@ -616,6 +621,7 @@ export default function App(){
       logAction("outgoing_create",{targetName:product.name,targetJan:product.jan,qty:arQty,detail:arDestination?{destination:arDestination}:null});
     }
     setModal(null);
+    }finally{setScanBusy(false);}
   }
 
   // カテゴリー管理
@@ -627,7 +633,9 @@ export default function App(){
 
   // 入庫手動追加
   async function confirmAddIncoming(){
-    if(!incomingModal||!profile)return;if(!incomingModal.name.trim()){addToast("商品名を入力してください","err");return;}
+    if(!incomingModal||!profile||inBusy)return;setInBusy(true);
+    try{
+    if(!incomingModal.name.trim()){addToast("商品名を入力してください","err");return;}
     const rec={...incomingModal,totalCost:(incomingModal.qty||0)*(incomingModal.cost||0)};
     const{data,error}=await supabase.rpc("sm_receive_stock_by_jan",{p_jan:rec.jan||"",p_qty:rec.qty||0,p_incoming:{date:rec.date,jan:rec.jan||"",name:rec.name,qty:rec.qty||0,cost:rec.cost||0,total_cost:rec.totalCost||0,maker:rec.maker||"",supplier:rec.supplier||"",note:rec.note||""}});
     if(error){addToast("エラーが発生しました","err");return;}
@@ -635,11 +643,14 @@ export default function App(){
     if(data.product_id!=null)setDb(d=>d.map(i=>i.id===data.product_id?{...i,qty:data.new_qty}:i));
     logAction("incoming_create",{targetName:rec.name,targetJan:rec.jan||null,qty:rec.qty||0});
     setIncomingModal(null);addToast("入庫履歴を追加（在庫+"+incomingModal.qty+"個）","ok");
+    }finally{setInBusy(false);}
   }
 
   // 出庫手動追加
   async function confirmAddOutgoing(){
-    if(!outgoingModal||!profile)return;if(!outgoingModal.name.trim()){addToast("商品名を入力してください","err");return;}if(!outgoingModal.qty||outgoingModal.qty<1){addToast("出庫数量を入力してください","err");return;}
+    if(!outgoingModal||!profile||outBusy)return;setOutBusy(true);
+    try{
+    if(!outgoingModal.name.trim()){addToast("商品名を入力してください","err");return;}if(!outgoingModal.qty||outgoingModal.qty<1){addToast("出庫数量を入力してください","err");return;}
     const item=db.find(i=>i.jan===outgoingModal.jan);
     if(item&&item.qty<outgoingModal.qty){addToast("在庫が不足しています（現在"+item.qty+"個）。出庫数量を"+item.qty+"個以下にしてください","err");return;}
     const rec={date:outgoingModal.date,jan:outgoingModal.jan,name:outgoingModal.name,qty:outgoingModal.qty,price:outgoingModal.price,totalPrice:outgoingModal.qty*outgoingModal.price,destination:outgoingModal.destination,note:outgoingModal.note};
@@ -655,11 +666,15 @@ export default function App(){
     }
     logAction("outgoing_create",{targetName:rec.name,targetJan:rec.jan||null,qty:rec.qty,detail:rec.destination?{destination:rec.destination}:null});
     setOutgoingModal(null);addToast("出庫を記録（在庫-"+outgoingModal.qty+"個）","ok");
+    }finally{setOutBusy(false);}
   }
 
   async function saveEditModal(){
     if(!editModal||!profile)return;
     const orig=db.find(i=>i.id===editModal.id);
+    if(orig&&(editModal.jan||"")!==(orig.jan||"")){
+      if(!window.confirm("JANを変更すると、過去の入出庫履歴との紐付けが切れ、履歴を削除しても在庫が戻らなくなります。変更しますか？"))return;
+    }
     const dbObj=prodToDB(editModal,profile.company_id);delete dbObj.qty;
     const{error}=await supabase.from("products").update(dbObj).eq("id",editModal.id);
     if(error){addToast("エラーが発生しました","err");return;}
@@ -674,6 +689,7 @@ export default function App(){
 
   async function saveEdit(id,field,val){
     if(field==="qty")return; // 在庫数は入庫・出庫の記録でのみ変わる（マスタでの直接編集は廃止）
+    if(field==="jan")return; // JANは入出庫履歴との紐付けキーなのでセル編集は不可（変更は編集モーダルで確認のうえ行う）
     const item=db.find(i=>i.id===id);
     const isNum=["price","cost","reorderPoint"].includes(field);
     const numVal=isNum?Number(val)||0:val;
@@ -947,7 +963,7 @@ export default function App(){
                     <tbody>{rows.map(item=>{const m=calcM(item.price,item.cost);const isAl=item.qty<=(item.reorderPoint||0);const l1=findL1(cats,item.catL1);const l3=findL3(cats,item.catL1,item.catL2,item.catL3);return(
                       <tr key={item.id}>
                         <td style={tdS}>{item.imageUrl?<img src={proxyImg(item.imageUrl)} alt="" style={{width:32,height:32,objectFit:"contain",borderRadius:4,background:"#fff"}} onError={e=>{e.target.style.display="none";}}/>:<span style={{color:"#484F58",fontSize:11}}>—</span>}</td>
-                        <td style={{...tdS,fontFamily:"monospace",fontSize:10,color:"#484F58"}}>{EditCell(item,"jan",item.jan,110,true)}</td>
+                        <td style={{...tdS,fontFamily:"monospace",fontSize:10,color:"#484F58"}}>{item.jan}</td>
                         <td style={{...tdS,maxWidth:150}}>{EditCell(item,"name",item.name,130,false)}</td>
                         <td style={{...tdS,cursor:"pointer"}} onClick={()=>setEditModal(item)} title="クリックで編集">{l1?<span style={{fontSize:11,fontWeight:600}}>{l1.emoji} {l1.name}</span>:<span style={{color:"#484F58",fontSize:11}}>—</span>}</td>
                         <td style={{...tdS,fontSize:11,color:"#8B949E",cursor:"pointer"}} onClick={()=>setEditModal(item)} title="クリックで編集">{l3?l3.name:"—"}</td>
@@ -1319,7 +1335,7 @@ export default function App(){
             </div>
             <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}>
               <button style={btnG} onClick={()=>setModal(null)}>キャンセル</button>
-              <button style={{...btnP,background:arMode==="incoming"?"#238636":"#8B5CF6",minWidth:140}} onClick={confirmScan}>{arMode==="incoming"?(modal.isNew?"✨ 新規登録＋入庫":"📥 入庫する ("+arQty+"個)"):"📤 出庫する ("+arQty+"個)"}</button>
+              <button style={{...btnP,background:arMode==="incoming"?"#238636":"#8B5CF6",minWidth:140,opacity:scanBusy?0.6:1}} disabled={scanBusy} onClick={confirmScan}>{arMode==="incoming"?(modal.isNew?"✨ 新規登録＋入庫":"📥 入庫する ("+arQty+"個)"):"📤 出庫する ("+arQty+"個)"}</button>
             </div>
           </div>
         </div>
@@ -1398,7 +1414,7 @@ export default function App(){
               </div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>備考</div><input style={inpS} type="text" value={incomingModal.note} onChange={e=>setIncomingModal(m=>({...m,note:e.target.value}))}/></div>
             </div>
-            <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}><button style={btnG} onClick={()=>setIncomingModal(null)}>キャンセル</button><button style={btnP} onClick={confirmAddIncoming}>追加する</button></div>
+            <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}><button style={btnG} onClick={()=>setIncomingModal(null)}>キャンセル</button><button style={{...btnP,opacity:inBusy?0.6:1}} disabled={inBusy} onClick={confirmAddIncoming}>追加する</button></div>
           </div>
         </div>
       )}
@@ -1416,7 +1432,7 @@ export default function App(){
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>販売先・出荷先</div><input style={inpS} type="text" value={outgoingModal.destination} onChange={e=>setOutgoingModal(m=>({...m,destination:e.target.value}))}/></div>
               <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>備考</div><input style={inpS} type="text" value={outgoingModal.note} onChange={e=>setOutgoingModal(m=>({...m,note:e.target.value}))}/></div>
             </div>
-            <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}><button style={btnG} onClick={()=>setOutgoingModal(null)}>キャンセル</button><button style={{...btnP,background:"#8B5CF6"}} onClick={confirmAddOutgoing}>📤 出庫を記録する</button></div>
+            <div style={{padding:"12px 16px",borderTop:"1px solid #30363D",display:"flex",justifyContent:"flex-end",gap:8}}><button style={btnG} onClick={()=>setOutgoingModal(null)}>キャンセル</button><button style={{...btnP,background:"#8B5CF6",opacity:outBusy?0.6:1}} disabled={outBusy} onClick={confirmAddOutgoing}>📤 出庫を記録する</button></div>
           </div>
         </div>
       )}
