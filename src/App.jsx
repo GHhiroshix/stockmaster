@@ -249,6 +249,16 @@ export default function App(){
   const[staffForm,setStaffForm]=useState({name:"",email:"",password:""});
   const[pwForm,setPwForm]=useState({current:"",newPw:"",confirm:""});
   const[pwBusy,setPwBusy]=useState(false);
+  const[authSuccess,setAuthSuccess]=useState(""); // ログイン画面に出す成功メッセージ（パスワード再設定完了時など）
+  const[resetMode,setResetMode]=useState(false); // ログイン画面でパスワード再設定フォームを表示中か
+  const[resetEmail,setResetEmail]=useState("");
+  const[resetBusy,setResetBusy]=useState(false);
+  const[resetSent,setResetSent]=useState(false);
+  const[resetSendError,setResetSendError]=useState("");
+  const[recoveryMode,setRecoveryMode]=useState(false); // 再設定メールのリンクから戻った直後の専用画面フラグ
+  const[recoveryForm,setRecoveryForm]=useState({newPw:"",confirm:""});
+  const[recoveryBusy,setRecoveryBusy]=useState(false);
+  const[recoveryError,setRecoveryError]=useState("");
   const[scanBusy,setScanBusy]=useState(false); // スキャン受入/出庫の二重送信防止
   const[inBusy,setInBusy]=useState(false); // 入庫手動追加の二重送信防止
   const[outBusy,setOutBusy]=useState(false); // 出庫手動追加の二重送信防止
@@ -296,13 +306,30 @@ export default function App(){
 
   // ── 初期化 ────────────────────────────────────────────
   useEffect(()=>{
+    // パスワード再設定リンクの期限切れ・無効で戻ってきた場合、URLに auth のエラーが付いている。
+    // ログイン画面に案内を出し、エラー部分はURLから取り除く（履歴に残さない）。
+    const hashParams=new URLSearchParams(window.location.hash.replace(/^#/,""));
+    const queryParams=new URLSearchParams(window.location.search);
+    if(hashParams.get("error")||hashParams.get("error_code")||queryParams.get("error")||queryParams.get("error_code")){
+      setAuthError("リンクの有効期限が切れているか、無効です。もう一度パスワード再設定をお試しください。");
+      setAuthMode("login");
+      window.history.replaceState(null,"",window.location.pathname);
+    }
     supabase.auth.getSession().then(({data:{session}})=>{
       setSession(session);
       if(session) loadProfile(session.user.id);
       else setAuthLoading(false);
     });
-    const{data:{subscription}}=supabase.auth.onAuthStateChange(async(_,session)=>{
+    const{data:{subscription}}=supabase.auth.onAuthStateChange(async(event,session)=>{
       if(registeringRef.current)return; // 登録処理の最中はここで何もしない（競合防止）
+      if(event==="PASSWORD_RECOVERY"){
+        // パスワード再設定リンクから戻った場合。通常のログインとしてアプリに入れず、
+        // 新しいパスワードの設定専用画面を出す（描画側で最優先表示）。
+        setSession(session);
+        setRecoveryMode(true);
+        setAuthLoading(false);
+        return;
+      }
       setSession(session);
       if(session){
         // ログイン時にプロフィールを読み込む
@@ -431,10 +458,50 @@ export default function App(){
 
   // ── 認証 ──────────────────────────────────────────────
   async function handleLogin(){
-    setAuthBusy(true);setAuthError("");
+    setAuthBusy(true);setAuthError("");setAuthSuccess("");
     const{error}=await supabase.auth.signInWithPassword({email:authForm.email,password:authForm.password});
     if(error)setAuthError("メールアドレスまたはパスワードが違います");
     setAuthBusy(false);
+  }
+
+  // ── パスワード再設定（送信側） ──────────────────────────
+  function openResetForm(){
+    setResetEmail(authForm.email||"");
+    setResetSendError("");setResetSent(false);
+    setAuthError("");setAuthSuccess("");
+    setResetMode(true);
+  }
+  function closeResetForm(){
+    setResetMode(false);setResetSent(false);setResetSendError("");
+  }
+  async function handleSendResetEmail(){
+    if(resetBusy)return;
+    if(!resetEmail.trim()){setResetSendError("メールアドレスを入力してください");return;}
+    setResetBusy(true);setResetSendError("");
+    const{error}=await supabase.auth.resetPasswordForEmail(resetEmail.trim(),{redirectTo:window.location.origin});
+    // 成否にかかわらず「アカウントが存在すれば送信した」という文面にし、登録有無を外に漏らさない。
+    // レート制限などでAPI自体がエラーのときだけ、一般的なエラーとして伝える。
+    if(error)setResetSendError("送信できませんでした。しばらく待ってからもう一度お試しください。");
+    else setResetSent(true);
+    setResetBusy(false);
+  }
+
+  // ── パスワード再設定（受信側: メールリンクから戻ったあと） ──
+  async function handleRecoveryPassword(){
+    if(recoveryBusy)return;
+    if(!recoveryForm.newPw||!recoveryForm.confirm){setRecoveryError("すべて入力してください");return;}
+    if(recoveryForm.newPw.length<6){setRecoveryError("パスワードは6文字以上にしてください");return;}
+    if(recoveryForm.newPw!==recoveryForm.confirm){setRecoveryError("新しいパスワードが一致しません");return;}
+    setRecoveryBusy(true);setRecoveryError("");
+    const{error}=await supabase.auth.updateUser({password:recoveryForm.newPw});
+    if(error){setRecoveryError("設定に失敗しました。リンクの有効期限が切れている場合は、もう一度パスワード再設定をお試しください。");setRecoveryBusy(false);return;}
+    // 成功したら、復旧セッションのままアプリに入らず、いったんサインアウトしてログイン画面に戻す
+    setAuthSuccess("パスワードを変更しました。新しいパスワードでログインしてください。");
+    setAuthMode("login");
+    await supabase.auth.signOut();
+    setRecoveryMode(false);
+    setRecoveryForm({newPw:"",confirm:""});
+    setRecoveryBusy(false);
   }
 
   async function handleRegisterAdmin(){
@@ -769,6 +836,29 @@ export default function App(){
   // ── ローディング中 ────────────────────────────────────
   if(authLoading){return(<div style={{minHeight:"100vh",background:"#0D1117",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}><div style={{fontSize:32}}>📦</div><div style={{color:"#8B949E",fontSize:14}}>読み込み中…</div></div>);}
 
+  // ── パスワード再設定画面（メール内のリンクから戻ったとき） ──
+  if(recoveryMode){
+    return(
+      <div style={{minHeight:"100vh",background:"#0D1117",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+        <div style={{width:"100%",maxWidth:400}}>
+          <div style={{textAlign:"center",marginBottom:32}}>
+            <div style={{fontSize:48,marginBottom:8}}>📦</div>
+            <div style={{fontSize:28,fontWeight:800,color:"#E6EDF3"}}>Stock<span style={{color:"#58A6FF"}}>Master</span></div>
+            <div style={{fontSize:13,color:"#484F58",marginTop:4}}>在庫管理システム</div>
+          </div>
+          <div style={{background:"#161B22",borderRadius:10,border:"1px solid #30363D",padding:20,display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{fontSize:15,fontWeight:700,color:"#E6EDF3"}}>🔑 新しいパスワードの設定</div>
+            <div style={{fontSize:12,color:"#8B949E",lineHeight:1.6}}>新しいパスワードを入力してください。設定が終わるとログイン画面に戻ります。</div>
+            <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>新しいパスワード (6文字以上)</div><input style={inpS} type="password" placeholder="新しいパスワード" value={recoveryForm.newPw} onChange={e=>setRecoveryForm(f=>({...f,newPw:e.target.value}))}/></div>
+            <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>新しいパスワード（確認）</div><input style={inpS} type="password" placeholder="もう一度入力" value={recoveryForm.confirm} onChange={e=>setRecoveryForm(f=>({...f,confirm:e.target.value}))} onKeyDown={e=>{if(e.key==="Enter"&&!recoveryBusy)handleRecoveryPassword();}}/></div>
+            {recoveryError&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#F85149"}}>{recoveryError}</div>}
+            <button style={{...btnP,padding:"12px",fontSize:14,opacity:recoveryBusy?0.6:1}} disabled={recoveryBusy} onClick={handleRecoveryPassword}>{recoveryBusy?"処理中…":"パスワードを設定する"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ── 認証画面 ──────────────────────────────────────────
   if(!session||!profile){
     return(
@@ -783,13 +873,29 @@ export default function App(){
           {/* タブ切り替え */}
           <div style={{display:"flex",background:"#161B22",borderRadius:8,padding:4,marginBottom:20,border:"1px solid #30363D"}}>
             {[["login","ログイン"],["register-admin","新規登録（管理者）"]].map(([m,l])=>(
-              <button key={m} style={{flex:1,padding:"8px 4px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:authMode===m?"#1F6FEB":"transparent",color:authMode===m?"#fff":"#8B949E",transition:"all .15s"}} onClick={()=>{setAuthMode(m);setAuthError("");}}>
+              <button key={m} style={{flex:1,padding:"8px 4px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,background:authMode===m?"#1F6FEB":"transparent",color:authMode===m?"#fff":"#8B949E",transition:"all .15s"}} onClick={()=>{setAuthMode(m);setAuthError("");setAuthSuccess("");closeResetForm();}}>
                 {l}
               </button>
             ))}
           </div>
 
           <div style={{background:"#161B22",borderRadius:10,border:"1px solid #30363D",padding:20,display:"flex",flexDirection:"column",gap:12}}>
+            {resetMode?(
+              <>
+                <div style={{fontSize:14,fontWeight:700,color:"#E6EDF3"}}>パスワードの再設定</div>
+                {!resetSent?(
+                  <>
+                    <div style={{fontSize:12,color:"#8B949E",lineHeight:1.6}}>登録しているメールアドレスを入力してください。再設定用のリンクをメールでお送りします。</div>
+                    <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メールアドレス</div><input style={inpS} type="email" placeholder="example@email.com" value={resetEmail} onChange={e=>setResetEmail(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!resetBusy)handleSendResetEmail();}}/></div>
+                    {resetSendError&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#F85149"}}>{resetSendError}</div>}
+                    <button style={{...btnP,padding:"12px",fontSize:14,opacity:resetBusy?0.6:1}} disabled={resetBusy} onClick={handleSendResetEmail}>{resetBusy?"処理中…":"再設定メールを送る"}</button>
+                  </>
+                ):(
+                  <div style={{background:"rgba(63,185,80,.1)",border:"1px solid rgba(63,185,80,.3)",borderRadius:6,padding:"10px 12px",fontSize:12,color:"#3FB950",lineHeight:1.6}}>入力されたメールアドレスのアカウントが存在する場合、再設定用のメールを送信しました。メール内のリンクから新しいパスワードを設定してください。</div>
+                )}
+                <div style={{textAlign:"center"}}><span style={{cursor:"pointer",color:"#58A6FF",fontSize:12,textDecoration:"underline"}} onClick={closeResetForm}>ログインに戻る</span></div>
+              </>
+            ):(<>
             {authMode==="register-admin"&&(
               <div style={{background:"rgba(210,153,34,.1)",border:"1px solid rgba(210,153,34,.3)",borderRadius:6,padding:"10px 12px",fontSize:12,color:"#D29922",lineHeight:1.6}}>
                 <div style={{marginBottom:4}}>📧 ここで入力する<b>メールアドレス・パスワードが、そのままログイン用のID・パスワード</b>になります。ご希望のものを入力してください。</div>
@@ -805,10 +911,15 @@ export default function App(){
             <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>メールアドレス</div><input style={inpS} type="email" placeholder="example@email.com" value={authForm.email} onChange={e=>setAuthForm(f=>({...f,email:e.target.value}))}/></div>
             <div><div style={{fontSize:11,color:"#8B949E",marginBottom:4}}>パスワード{authMode!=="login"&&<span style={{color:"#484F58"}}> (6文字以上)</span>}</div><input style={inpS} type="password" placeholder="パスワード" value={authForm.password} onChange={e=>setAuthForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>{if(e.key==="Enter"&&!authBusy){if(authMode==="login")handleLogin();else handleRegisterAdmin();}}}/></div>
             {authError&&<div style={{background:"rgba(248,81,73,.1)",border:"1px solid rgba(248,81,73,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#F85149"}}>{authError}</div>}
+            {authSuccess&&<div style={{background:"rgba(63,185,80,.1)",border:"1px solid rgba(63,185,80,.3)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#3FB950"}}>{authSuccess}</div>}
             {authMode==="register-admin"&&<div style={{background:"rgba(88,166,255,.1)",border:"1px solid rgba(88,166,255,.2)",borderRadius:6,padding:"8px 12px",fontSize:11,color:"#58A6FF"}}>登録後、運営の承認をお待ちください。承認後、ログインしてから「スタッフ管理」画面でスタッフを追加できます。</div>}
             <button style={{...btnP,padding:"12px",fontSize:14,opacity:authBusy?0.6:1}} onClick={()=>{if(authMode==="login")handleLogin();else handleRegisterAdmin();}} disabled={authBusy}>
               {authBusy?"処理中…":authMode==="login"?"ログイン":"管理者として登録"}
             </button>
+            {authMode==="login"&&(
+              <div style={{textAlign:"center"}}><span style={{cursor:"pointer",color:"#58A6FF",fontSize:12,textDecoration:"underline"}} onClick={openResetForm}>パスワードをお忘れですか</span></div>
+            )}
+            </>)}
           </div>
 
           {/* フッター：利用規約・プライバシーポリシー */}
